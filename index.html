@@ -12,6 +12,13 @@
 <meta property="og:description" content="Engine-verdict review of your chess games: per-move accuracy, mistake classification and critical moments. Runs entirely in your browser.">
 <meta name="twitter:card" content="summary">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%E2%99%9E%3C/text%3E%3C/svg%3E">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Chess Analyzer">
 <script src="https://cdn.jsdelivr.net/npm/chess.js@0.12.1/chess.js"></script>
 <style>
 :root{
@@ -1621,6 +1628,14 @@ if(window.matchMedia && window.matchMedia('(max-width:760px)').matches){
 }
 
 try{renderBoard('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');}catch(e){console.error('Initial board render failed',e);}
+
+// Registering this is what lets a browser offer "install"/"add to home
+// screen" and lets the page shell open even with no connection.
+if('serviceWorker' in navigator){
+  window.addEventListener('load',()=>{
+    navigator.serviceWorker.register('sw.js').catch(()=>{});
+  });
+}
 </script>
 </body>
 </html>
