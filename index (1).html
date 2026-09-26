@@ -1,0 +1,1626 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Chess Analyzer</title>
+<meta name="description" content="Paste a PGN and get an engine-verdict review of your chess game: per-move accuracy, mistake classification, critical moments and opening detection. Runs entirely in your browser.">
+<meta name="theme-color" content="#171512">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Chess Analyzer">
+<meta property="og:title" content="Chess Analyzer">
+<meta property="og:description" content="Engine-verdict review of your chess games: per-move accuracy, mistake classification and critical moments. Runs entirely in your browser.">
+<meta name="twitter:card" content="summary">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%E2%99%9E%3C/text%3E%3C/svg%3E">
+<script src="https://cdn.jsdelivr.net/npm/chess.js@0.12.1/chess.js"></script>
+<style>
+:root{
+  --bg:#171512; --panel:#211f1c; --line:#332f2a; --text:#eee7da; --muted:#9c9284;
+  --accent:#d9a441; --light:#e9d6b6; --dark:#7a5a3a;
+  --best:#5c9e5c; --exc:#7fb37f; --good:#8fae3a; --inacc:#d9b23a; --mist:#e08a3a; --blun:#d5544a;
+  box-sizing:border-box; padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+*{box-sizing:border-box}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--text);font-family:'Georgia',serif;min-height:100%}
+header{padding:18px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px}
+header h1{font-size:1.25rem;margin:0;font-weight:600;letter-spacing:.3px}
+header .tag{color:var(--muted);font-size:.8rem}
+.wrap{max-width:1100px;margin:0 auto;padding:18px}
+.setup{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:18px}
+textarea{width:100%;min-height:90px;background:#141210;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:10px;font-family:monospace;font-size:.85rem;resize:vertical}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px}
+select,button{font-family:inherit;font-size:.85rem;background:#141210;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 12px;cursor:pointer}
+button.primary{background:var(--accent);color:#1a1510;font-weight:700;border:none}
+button:disabled{opacity:.5;cursor:default}
+.muted{color:var(--muted);font-size:.8rem}
+.err{display:none;margin-top:10px;background:#2a1a18;border:1px solid #6d3630;color:#f2ccc6;padding:9px 11px;border-radius:8px;font-size:.82rem;line-height:1.55}
+.main{display:flex;gap:18px;flex-wrap:wrap}
+.boardcol{flex:0 0 340px}
+.board{width:340px;height:340px;display:grid;grid-template-columns:repeat(8,1fr);grid-template-rows:repeat(8,1fr);border:2px solid var(--line);border-radius:6px;overflow:hidden;max-width:100%}
+.sq{display:flex;align-items:center;justify-content:center;user-select:none}
+.sq.l{background:#eef0d8} .sq.d{background:#7fa050}
+.sq svg{width:80%;height:80%;filter:drop-shadow(0 1.5px 1px rgba(0,0,0,.4))}
+.sq .wp{fill:#f7f7f2;stroke:#232323;stroke-width:1.4;stroke-linejoin:round}
+.sq .bp{fill:#2a2a2a;stroke:#000;stroke-width:1.4;stroke-linejoin:round}
+.navrow{display:flex;gap:8px;margin-top:10px;justify-content:center}
+.side{flex:1;min-width:320px;display:flex;flex-direction:column;gap:14px}
+.progress{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px;display:none}
+.bar{height:8px;background:#141210;border-radius:4px;overflow:hidden;margin-top:6px}
+.bar > div{height:100%;background:var(--accent);width:0%}
+.summary{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;display:none}
+.accrow{display:flex;justify-content:space-between;font-size:1.05rem;margin-bottom:8px}
+.acccell b{font-size:1.4rem}
+.stats{margin-top:8px;overflow-x:auto}
+.graph{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px;display:none}
+.movelist{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px;max-height:300px;overflow-y:auto;display:none;font-size:.9rem}
+.mv{display:inline-block;padding:2px 6px;margin:2px;border-radius:5px;cursor:pointer;border:1px solid transparent}
+.mv:hover{border-color:var(--accent)}
+.mv.active{background:#3a3324;border-color:var(--accent)}
+.tag-best{color:var(--best)} .tag-exc{color:var(--exc)} .tag-good{color:var(--good)}
+.tag-inacc{color:var(--inacc)} .tag-mist{color:var(--mist)} .tag-blun{color:var(--blun);font-weight:700}
+.tag-brill{color:#3fb8c9;font-weight:700} .tag-great{color:#4fa8e0;font-weight:700}
+.tag-miss{color:#c98a3f} .tag-book{color:var(--muted)}
+.opening{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin-bottom:12px;font-size:.9rem;display:none}
+.tabs{display:flex;gap:6px;margin-bottom:14px}
+.tabbtn{background:var(--panel);border:1px solid var(--line);color:var(--muted);padding:9px 18px;border-radius:8px 8px 0 0;cursor:pointer;font-family:inherit;font-size:.9rem}
+.tabbtn.active{background:var(--panel);color:var(--accent);border-bottom:2px solid var(--accent);font-weight:700}
+.tabpane{display:none}
+.tabpane.active{display:block}
+.boardrow{display:flex;gap:10px}
+.evalbar{width:22px;height:340px;border:1px solid var(--line);border-radius:4px;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end;background:#1c1a17}
+.evalbar .whitefill{background:#eee7da;width:100%;height:50%;transition:height .3s}
+.evallabel{text-align:center;font-size:.7rem;color:var(--muted);margin-top:4px}
+.critlist{display:flex;flex-direction:column;gap:6px;margin-top:10px}
+.crit{background:#141210;border-radius:6px;padding:8px 10px;cursor:pointer;font-size:.85rem;border-left:3px solid var(--blun)}
+.crit:hover{background:#1c1916}
+.acccircle{display:flex;justify-content:space-around;gap:14px}
+.acccircle .cell{text-align:center}
+.acccircle b{font-size:2rem;display:block}
+ .accnote{margin-top:6px;font-size:.75rem;line-height:1.5}
+ .mv .sym{font-size:.68rem;font-weight:700;margin-left:1px;opacity:.9}
+ .mtable{width:100%;border-collapse:collapse;font-size:.78rem;margin-top:8px}
+ .mtable th,.mtable td{text-align:left;padding:5px 6px;border-top:1px solid var(--line)}
+ .mtable th{color:var(--muted);font-weight:400;font-size:.72rem;text-transform:uppercase;letter-spacing:.5px}
+ .mtable td:first-child{color:var(--muted)}
+ .mtable td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+ .detail{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:14px}
+ .detail .hd{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;font-size:1.1rem;margin-bottom:6px}
+ .kv{display:grid;grid-template-columns:minmax(110px,auto) 1fr;gap:4px 12px;font-size:.83rem;margin:6px 0 0}
+ .kv dt{color:var(--muted)}
+ .kv dd{margin:0}
+ .kv dd .hi{color:#f2e7d2}
+ .pvline{font-family:monospace;font-size:.78rem;background:#141210;border-radius:6px;padding:6px 8px;margin-top:6px;word-break:break-word;color:#cfc4b0;line-height:1.5}
+ .pvline b{color:var(--muted);font-weight:400;font-family:Georgia,serif}
+ .badge{display:inline-block;font-size:.68rem;padding:1px 7px;border-radius:999px;background:#2c2822;color:var(--muted);border:1px solid var(--line);margin:2px 4px 2px 0}
+ .badge.force{border-color:#4a86b8;color:#8fc0e8}
+ .badge.book{border-color:#5a5348}
+ .badge.lowm{border-color:#8a6f3a;color:#d9b23a}
+ .badge.matef{border-color:#b8624a;color:#e08a3a}
+ .badge.good2{border-color:#5c9e5c;color:#7fb37f}
+ .spec{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-top:14px}
+ .spec h3{margin:0 0 6px;font-size:.95rem;color:var(--accent)}
+ .note{color:var(--muted);font-size:.76rem;margin:8px 0;line-height:1.6}
+ table.rules{width:100%;border-collapse:collapse;font-size:.77rem}
+ table.rules th,table.rules td{text-align:left;padding:6px 7px;border-top:1px solid var(--line);vertical-align:top}
+ table.rules th{color:var(--muted);font-weight:400;font-size:.7rem;text-transform:uppercase;letter-spacing:.5px}
+ table.rules td.sym{white-space:nowrap;font-weight:700;width:1%;font-size:.8rem}
+ table.rules td.acc{white-space:nowrap;color:var(--muted);width:1%;text-align:center}
+ table.rules code{font-family:monospace;color:#e9dfc9;background:#141210;padding:1px 5px;border-radius:4px;font-size:.75rem}
+ .src{color:var(--accent);font-size:.76rem;margin-top:2px}
+  /* ---- Phones and small tablets ---------------------------------------
+     The layout above is a fixed 340px board sitting beside a column with a
+     320px minimum, which cannot fit a 375px-wide screen. Everything below
+     makes the board fluid, stacks the two columns, and enlarges the tap
+     targets so the navigation buttons are usable with a thumb. */
+  @media (max-width:760px){
+    header{flex-direction:column;align-items:flex-start;gap:4px;padding:12px 14px}
+    header .tag{font-size:.72rem;line-height:1.45}
+    .wrap{padding:12px}
+    .setup{padding:12px;margin-bottom:12px;border-radius:8px}
+    textarea{min-height:76px;font-size:.9rem}
+
+    /* Tappable controls: 44px is the smallest comfortable touch target. */
+    select,button{font-size:.9rem;padding:11px 12px;min-height:44px}
+    .row{gap:8px}
+    .row > label{flex:1 1 44%;display:flex;flex-direction:column;gap:4px;font-size:.7rem}
+    .row > label select{width:100%}
+    button.primary{flex:1 1 100%}
+
+    .main{gap:12px}
+    .boardcol{flex:1 1 100%}
+    .boardrow{justify-content:center}
+    /* Fluid square board. aspect-ratio keeps the 8x8 grid rows square
+       without the fixed 340px height that used to squash them. */
+    .board{width:100%;max-width:340px;height:auto;aspect-ratio:1/1}
+    /* The vertical eval bar is fixed at 340px tall and its fill is driven by
+       `style.height` from analyze(), so it cannot follow a fluid board.
+       Hidden on phones; the numeric eval label under it is kept. */
+    .evalbar{display:none}
+    .evallabel{font-size:.78rem;font-weight:600}
+    .navrow{gap:6px}
+    .navrow button{flex:1 1 22%;padding:12px 4px;font-size:.8rem}
+
+    .side{min-width:0;gap:12px}
+    .summary,.graph,.detail,.spec{padding:12px;border-radius:8px}
+    .stats{font-size:.72rem}
+    .acccircle{gap:8px}
+    .acccircle b{font-size:1.5rem}
+    .accrow{font-size:.95rem}
+    .kv{grid-template-columns:1fr;gap:1px 0;font-size:.8rem}
+    .kv dt{margin-top:6px}
+    .tabs{gap:4px;overflow-x:auto;scrollbar-width:none}
+    .tabs::-webkit-scrollbar{display:none}
+    .tabbtn{flex:1 0 auto;padding:10px 12px;font-size:.82rem;white-space:nowrap}
+    .movelist{max-height:44vh;font-size:.95rem}
+    .mv{padding:5px 8px;margin:3px}
+    .mtable{font-size:.74rem}
+    table.rules{font-size:.72rem}
+    table.rules th,table.rules td{padding:5px 4px}
+    .pvline{font-size:.74rem}
+    .note{font-size:.72rem}
+  }
+
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+<defs>
+<symbol id="pc-pawn" viewBox="0 0 45 45"><circle cx="22.5" cy="13" r="6.5"/><path d="M16 33 L19 20 H26 L29 33 Z"/><rect x="13" y="33" width="19" height="5" rx="1.5"/></symbol>
+<symbol id="pc-rook" viewBox="0 0 45 45"><rect x="14" y="8" width="4.5" height="8"/><rect x="20.5" y="8" width="4.5" height="8"/><rect x="27" y="8" width="4.5" height="8"/><rect x="13" y="16" width="19" height="4"/><path d="M16 20 L15 33 H30 L29 20 Z"/><rect x="12" y="33" width="21" height="5" rx="1.5"/></symbol>
+<symbol id="pc-knight" viewBox="0 0 45 45"><path d="M11 33 L12 21 Q13 12 21 9 Q28 6 33 12 L31 16 L27 14 L29 19 L21 17 L18 21 L21 26 L15 29 L15 33 Z"/><rect x="10" y="33" width="25" height="5" rx="1.5"/></symbol>
+<symbol id="pc-bishop" viewBox="0 0 45 45"><circle cx="22.5" cy="8" r="3"/><path d="M22.5 12 L30 27 Q31 33 22.5 33 Q14 33 15 27 Z"/><rect x="13" y="33" width="19" height="5" rx="1.5"/></symbol>
+<symbol id="pc-queen" viewBox="0 0 45 45"><circle cx="12" cy="10" r="2.6"/><circle cx="18.5" cy="7" r="2.6"/><circle cx="22.5" cy="15" r="2.6"/><circle cx="26.5" cy="7" r="2.6"/><circle cx="33" cy="10" r="2.6"/><path d="M12 12 L14 22 H31 L33 12 L26.5 16 L22.5 9 L18.5 16 Z"/><path d="M14 22 L13 33 H32 L31 22 Z"/><rect x="11" y="33" width="23" height="5" rx="1.5"/></symbol>
+<symbol id="pc-king" viewBox="0 0 45 45"><rect x="21" y="2" width="3" height="9"/><rect x="18" y="5" width="9" height="3"/><path d="M14 15 H31 L29 30 H16 Z"/><path d="M13 30 L15 15 M32 30 L30 15" fill="none" stroke-width="1.4"/><rect x="12" y="33" width="21" height="5" rx="1.5"/></symbol>
+</defs>
+</svg>
+<header><h1>♞ Chess Analyzer</h1><span class="tag">Engine-verdict review — top engine lines, mate awareness, forced-move detection · runs entirely in your browser</span></header>
+<div class="wrap">
+  <div class="setup">
+    <textarea id="pgnInput" placeholder="Paste PGN here, e.g.
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 ..."></textarea>
+    <div class="row">
+      <label class="muted">Depth
+        <select id="depthSel">
+          <option value="10">10 — fast</option>
+          <option value="12" selected>12 — balanced</option>
+          <option value="14">14 — deeper</option>
+          <option value="16">16 — slow, stronger</option>
+        </select>
+      </label>
+      <label class="muted">Engine lines
+        <select id="pvSel">
+          <option value="1">1 — fastest</option>
+          <option value="2" selected>2 — detects forced moves</option>
+          <option value="3">3 — deepest classification</option>
+        </select>
+      </label>
+      <label class="muted">Theory
+        <select id="bookSel">
+          <option value="auto" selected>Auto (opening match)</option>
+          <option value="0">Off (no book moves)</option>
+          <option value="8">First 8 plies</option>
+          <option value="12">First 12 plies</option>
+          <option value="20">First 20 plies</option>
+        </select>
+      </label>
+      <button class="primary" id="analyzeBtn">Analyze Game</button>
+      <span class="muted" id="engStatus">engine idle</span>
+    </div>
+    <div class="err" id="errBox"></div>
+  </div>
+
+  <div class="setup" id="linkBox">
+    <div class="row" style="margin-top:0">
+      <select id="platformSel">
+        <option value="lichess">Lichess</option>
+        <option value="chesscom">Chess.com</option>
+      </select>
+      <input id="userInput" placeholder="username" style="background:#141210;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 12px;font-family:inherit">
+      <button id="fetchBtn">Fetch recent games</button>
+      <span class="muted" id="linkStatus"></span>
+    </div>
+    <div class="muted" style="margin-top:6px">No login needed — this reads public game history only.</div>
+    <div id="gameList" style="margin-top:10px;display:flex;flex-direction:column;gap:4px"></div>
+  </div>
+
+  <div class="tabs">
+    <button class="tabbtn active" data-tab="analysis">Analysis</button>
+    <button class="tabbtn" data-tab="report">Report</button>
+  </div>
+
+  <div class="tabpane active" id="tab-analysis">
+    <div class="main">
+      <div class="boardcol">
+        <div class="boardrow">
+          <div class="evalbar"><div class="whitefill" id="evalFill"></div></div>
+          <div class="board" id="board"></div>
+        </div>
+        <div class="evallabel" id="evalLabel">–</div>
+        <div class="navrow">
+          <button id="firstBtn">⏮</button>
+          <button id="prevBtn">◀</button>
+          <button id="nextBtn">▶</button>
+          <button id="lastBtn">⏭</button>
+        </div>
+        <div class="progress" id="progress">
+          <span class="muted" id="progLabel">Analyzing…</span>
+          <div class="bar"><div id="progFill"></div></div>
+        </div>
+      </div>
+      <div class="side">
+        <div class="movelist" id="moveList"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tabpane" id="tab-report">
+    <div class="opening" id="openingBox"></div>
+    <div class="summary" id="summary">
+      <div class="acccircle">
+        <div class="cell">White accuracy<br><b id="wAcc">–</b></div>
+        <div class="cell">Black accuracy<br><b id="bAcc">–</b></div>
+      </div>
+      <div class="accnote muted" id="accNote">–</div>
+      <div class="stats" id="statsGrid"></div>
+    </div>
+    <div class="summary" id="metricBox" style="display:none">
+      <b>Engine metrics</b>
+      <table class="mtable" id="metricTable"></table>
+    </div>
+    <div class="graph" id="graphBox"><svg id="evalSvg" viewBox="0 0 600 100" style="width:100%;height:100px;display:block"></svg></div>
+    <div class="detail" id="detailBox">
+      <div class="hd"><span id="dTitle">Engine verdict — click any move in the Analysis tab</span></div>
+      <div id="dBadges"></div>
+      <dl class="kv" id="dKv"></dl>
+      <div class="pvline" id="dPvBefore"></div>
+      <div class="pvline" id="dPvAfter"></div>
+    </div>
+    <div class="summary" id="critBox" style="display:none">
+      <b>Critical moments</b>
+      <div class="critlist" id="critList"></div>
+    </div>
+    <div class="spec" id="specBox">
+      <h3>Classification &amp; accuracy spec — exactly how the engine decides</h3>
+      <div class="src">Evaluations from <span id="specSource">–</span> · <span id="specDepth">–</span> · <span id="specMultipv">–</span></div>
+      <div class="note">
+        Every label below is taken from the engine's own report for that position: the centipawn (or mate) score
+        <i>before</i> the move, the score of the position <i>after</i> the played move, and the engine's alternative lines.
+        All numbers are from the <b>mover's</b> point of view.
+        Win probability uses the standard conversion
+        <code>50 + 50·(2/(1+e^(−0.00368208·cp)) − 1)</code>, and a forced mate is smoothed to
+        <code>100 − 2·(moves−1)</code>% so a mate in 5 is not treated as an instant 100% swing.
+      </div>
+      <div class="note">
+        Rules are applied top to bottom and the first match wins.
+      </div>
+      <div class="note">
+        <b>Accuracy score.</b> Each counted move gets a per-move accuracy
+        <code>103.1668·e^(−0.04354·winLoss) − 3.1669</code> from its own win% loss. The headline
+        game accuracy is not a plain average of those numbers: each move is weighted by the local
+        standard deviation of win% in a small window around it (window size <code>clamp(plies/10, 2, 8)</code>,
+        weight itself clamped to <code>0.5–12</code>), so a slip deep in an already-decided position counts
+        for less than one in a sharp, contested position. The final percentage is the average of the
+        weighted mean and the weighted harmonic mean of those per-move accuracies — the harmonic half
+        means one real blunder pulls an otherwise clean game's score down more than a plain average would.
+        The old plain average is still shown in the Engine metrics table for comparison.
+      </div>
+      <table class="rules">
+        <thead><tr><th>Label</th><th>Engine rule (mover's point of view)</th><th>In accuracy</th></tr></thead>
+        <tbody>
+          <tr><td class="tag-book">Book</td><td>Move lies inside detected opening theory (the matched opening line, or the ply count you chose). Reported by the engine as roughly equal, and excluded from accuracy.</td><td class="acc">no</td></tr>
+          <tr><td class="tag-miss">Missed mate ×</td><td>The engine had a forced mate in <em>M</em> before the move and the played move does not keep a forced mate.</td><td class="acc">yes</td></tr>
+          <tr><td class="tag-blun">Gave a mate ?!!</td><td>The move allows a forced mate for the opponent that did not exist before it.</td><td class="acc">yes</td></tr>
+          <tr><td class="tag-brill">Brilliant !!</td><td>Real sacrifice <em>and</em> the engine's verdict after the move is still fine: the move gives up at least <code data-t="brillSac">200</code> cp of net material, loses at most <code data-t="brillWpl">3</code> win% and <code data-t="brillCp">30</code> cp, and the mover is still at or above +<code data-t="brillFloor">20</code> cp. A delivered mate counts as Brilliant only when it cost material, otherwise it is Best.</td><td class="acc">yes</td></tr>
+          <tr><td class="tag-great">Great !</td><td>Keeps a lost position alive, or holds a won one that every alternative throws away, or escapes a forced mate with no loss. Rescues a lost position: was at or below <code data-t="greatSavedAt">45</code> win%, loses at most <code data-t="greatWpl">5</code> win%, ends at 20% win% or better. Holds a won position: was at <code data-t="wonAt">60</code> win% or better, loses at most <code data-t="greatWpl">5</code> win%, while the engine's second line gives away at least <code data-t="missWpl">10</code> win%.</td><td class="acc">yes</td></tr>
+          <tr><td class="tag-best">Best ✓</td><td>The move <em>is</em> the engine's #1 line, or it loses at most <code data-t="perfectWpl">2.7</code> win% and <code data-t="perfectCp">20</code> cp.</td><td class="acc">yes</td></tr>
+          <tr><td class="tag-exc">Excellent</td><td>Loses at most <code data-t="excWpl">5</code> win% or <code data-t="excCp">45</code> cp.</td><td class="acc">yes</td></tr>
+          <tr><td class="tag-good">Good</td><td>Loses at most <code data-t="goodWpl">10</code> win% or <code data-t="goodCp">90</code> cp.</td><td class="acc">yes</td></tr>
+          <tr><td class="tag-miss">Missed win ×</td><td>The mover had <code data-t="wonAt">60</code> win% or more and handed at least <code data-t="missWpl">10</code> win% of it back.</td><td class="acc">yes</td></tr>
+          <tr><td class="tag-inacc">Inaccuracy ?!</td><td>Loses at most <code data-t="inaccWpl">20</code> win% or <code data-t="inaccCp">200</code> cp.</td><td class="acc">yes</td></tr>
+          <tr><td class="tag-mist">Mistake ??</td><td>Loses between <code data-t="inaccWpl">20</code> and <code data-t="mistakeWpl">30</code> win%, or <code data-t="inaccCp">200</code> and <code data-t="mistakeCp">600</code> cp.</td><td class="acc">yes</td></tr>
+          <tr><td class="tag-blun">Blunder ?!!</td><td>Loses more than <code data-t="mistakeWpl">30</code> win% or <code data-t="mistakeCp">600</code> cp, surrenders at least <code data-t="sacBlunder">300</code> cp of material with no engine compensation, or walks into a forced mate.</td><td class="acc">yes</td></tr>
+          <tr><td class="muted">⚑ Only move</td><td>Badge, not a label: the engine's second line is at least <code data-t="onlyMoveGap">8</code> win% worse than the best line and the played move is that second line, so nothing better existed.</td><td class="acc">no</td></tr>
+          <tr><td class="muted">⚑ Unavoidable</td><td>Badge, not a label: best line and second line both already give away at least <code data-t="inaccWpl">20</code> win% — the damage was already done before the move.</td><td class="acc">no</td></tr>
+          <tr><td class="muted">⚑ Precision endgame</td><td>Badge, not a label: bare endgame (no pawns left and at most <code data-t="lowMaterialCp">1000</code> cp of non-pawn material) where the evaluation is too thin to judge accuracy.</td><td class="acc">no</td></tr>
+        </tbody>
+      </table>
+      <div class="note">
+        <b>Accuracy</b> = mean over counted plies of <code>103.1668·e^(−0.04354·win%loss) − 3.1669</code>, clamped to 0–100
+        (a loss-free move scores exactly 100, a 20 win% loss scores ≈40). Book, forced, unavoidable, precision-endgame and
+        finished positions are excluded so they cannot inflate or deflate the number.
+        <br><b>ACPL</b> = mean centipawn loss against the engine's top line; plies decided by mate are excluded.
+        <b>Decisive moves</b> = counted plies where at least one engine line changed the result.
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+const PIECES={p:'pc-pawn',n:'pc-knight',b:'pc-bishop',r:'pc-rook',q:'pc-queen',k:'pc-king',
+              P:'pc-pawn',N:'pc-knight',B:'pc-bishop',R:'pc-rook',Q:'pc-queen',K:'pc-king'};
+let sf=null, sfReady=false, sunk=false, searchSink=null;
+let fenList=[], sanList=[], moveMeta=[], matesAt=[], evals=[], plies=[], curPly=0;
+let bookPlies=0, opening=null, engineLines=2, depthUsed=0;
+const $=(id)=>document.getElementById(id);
+
+// Stockfish.js (nmrugg build) must run *inside* a worker: the glue only installs
+// its binary reader when `importScripts` exists, and it reads the wasm path from
+// the worker's own location hash. Two things follow:
+//   1. a plain <script> tag is not enough -> the glue is loaded with importScripts
+//      inside a blob worker;
+//   2. the wasm is read with a *synchronous* XHR, so it cannot be a cross-origin
+//      CDN URL -> the bytes are fetched here and re-published as a same-origin
+//      blob URL, which is then handed over in the worker URL's hash.
+// (The previous version pointed at .../stockfish@10.0.2/stockfish.js, which is a
+// 404, and used `new Worker(cdnUrl)`, which browsers refuse cross-origin.)
+const ENGINE_SOURCES=[
+  {js:'https://cdn.jsdelivr.net/npm/stockfish@10.0.2/src/stockfish.js',
+   wasm:'https://cdn.jsdelivr.net/npm/stockfish@10.0.2/src/stockfish.wasm'},
+  {js:'https://unpkg.com/stockfish@10.0.2/src/stockfish.js',
+   wasm:'https://unpkg.com/stockfish@10.0.2/src/stockfish.wasm'}
+];
+async function spawnEngine(src){
+  const resp=await fetch(src.wasm);
+  if(!resp.ok) throw new Error('wasm download failed ('+resp.status+')');
+  const buf=await resp.arrayBuffer();
+  if(!buf.byteLength) throw new Error('empty wasm binary');
+  const wasmUrl=URL.createObjectURL(new Blob([buf],{type:'application/wasm'}));
+  const loaderUrl=URL.createObjectURL(new Blob(["importScripts('"+src.js+"');"],{type:'text/javascript'}));
+  // Chromium refuses to construct a Worker at all when the page itself came
+  // from disk: "Failed to construct 'Worker': Script at 'blob:null/...'
+  // cannot be accessed from origin 'null'." That is the single point where the
+  // engine dies for a locally opened copy of this file, so it is worth failing
+  // loudly here instead of sitting on the handshake timeout.
+  let worker;
+  try{ worker=new Worker(loaderUrl+'#'+wasmUrl); }
+  catch(e){ throw new Error('worker blocked ('+((e&&e.message)||e)+')'); }
+  return worker;
+}
+function handshake(worker,ms){
+  return new Promise((resolve,reject)=>{
+    let done=false;
+    const settle=(fn,arg)=>{
+      if(done) return;
+      done=true; clearTimeout(timer);
+      worker.removeEventListener('message',onmsg);
+      worker.removeEventListener('error',onerr);
+      fn(arg);
+    };
+    const timer=setTimeout(()=>settle(reject,new Error('engine handshake timeout')),ms||15000);
+    // A worker that cannot boot fires 'error'. Without this listener the
+    // promise could only ever be settled by the timeout above, which meant a
+    // dead engine cost 25s per CDN on every single click.
+    const onerr=e=>settle(reject,new Error('engine worker failed ('+((e&&e.message)||'load error')+')'));
+    const onmsg=e=>{
+      const line=String(e.data||'').trim();
+      if(line==='uciok') settle(resolve);
+      else if(/^error|error:/i.test(line)) settle(reject,new Error(line));
+    };
+    worker.addEventListener('message',onmsg);
+    worker.addEventListener('error',onerr);
+    worker.postMessage('uci');
+  });
+}
+// Liveness probe. A worker can complete the `uci` handshake and still be dead
+// moments later, and the only reliable way to find out is to make it answer.
+function ping(worker,ms){
+  return new Promise((resolve,reject)=>{
+    let done=false;
+    const settle=(ok,why)=>{
+      if(done) return;
+      done=true; clearTimeout(t);
+      worker.removeEventListener('message',onmsg);
+      worker.removeEventListener('error',onerr);
+      ok?resolve():reject(new Error(why));
+    };
+    const t=setTimeout(()=>settle(false,'engine did not answer isready'),ms||5000);
+    const onerr=e=>settle(false,'engine worker failed ('+((e&&e.message)||'load error')+')');
+    const onmsg=e=>{ if(String(e.data||'').trim()==='readyok') settle(true); };
+    worker.addEventListener('message',onmsg);
+    worker.addEventListener('error',onerr);
+    worker.postMessage('isready');
+  });
+}
+async function initEngine(){
+  let lastErr=null;
+  for(const src of ENGINE_SOURCES){
+    let worker=null;
+    try{
+      worker=await spawnEngine(src);
+      await handshake(worker,15000);
+      await ping(worker);                 // alive before we configure it
+      sf=worker;
+      sfReady=true;
+      attachSink();
+      sendOption('Hash',16);
+      // Deliberately NOT sending "Threads". stockfish.js 10 is a single
+      // threaded build, and `setoption name Threads value 1` kills it dead
+      // immediately after uciok. The old code sent it, so every single
+      // position then timed out with zero engine lines, got quietly scored
+      // by the weak JS fallback, and the status line still said
+      // "analyzing with Stockfish…". Verified: with Threads -> 0 info lines
+      // and no bestmove; without it -> normal search output.
+      await ping(worker);                 // and still alive after configuring it
+      return;
+    }catch(e){ lastErr=e; try{ worker && worker.terminate(); }catch(_){} }
+  }
+  throw lastErr||new Error('No Stockfish engine could be started.');
+}
+
+// Single permanent message pump. Every search borrows it through searchSink so
+// late lines from a finished search can never be read by the next one.
+function attachSink(){
+  if(!sf || sunk) return;
+  sunk=true;
+  sf.addEventListener('message',e=>{
+    const line=String(e.data||'');
+    if(!searchSink) return;
+    if(line.startsWith('info')){
+      const p=parseInfoLine(line);
+      if(p) searchSink.onInfo(p);
+    }else if(line.startsWith('bestmove')){
+      const m=/^bestmove\s+(\S+)/.exec(line);
+      searchSink.onBest(m?m[1]:null);
+    }
+  });
+}
+function sendOption(name,value){ try{ sf.postMessage('setoption name '+name+' value '+value); }catch(e){} }
+
+let usingFallback=false, engineErr='', sfNoLines=0;
+async function ensureEngine(){
+  if(sfReady || usingFallback) return;
+  if(location.protocol==='file:'){
+    // Chromium does not allow Web Workers on file:// pages at all, so there is
+    // no point spending 30s on two handshakes that cannot possibly succeed.
+    usingFallback=true;
+    engineErr='browsers do not allow Web Workers on file:// pages';
+  } else {
+    try{ await initEngine(); }
+    catch(e){ usingFallback=true; engineErr=e.message||String(e); }
+  }
+  if(usingFallback) $('engStatus').textContent='built-in evaluator — no Stockfish ('+engineErr+')';
+}
+// Say plainly why there is no Stockfish instead of silently swapping in a much
+// weaker evaluator and letting the user wonder about the numbers later.
+function warnNoEngine(){
+  const msg = location.protocol==='file:'
+    ? 'Stockfish cannot start: this page is open from disk (file://) and Chromium does not allow Web Workers on file:// pages. '+
+      'The built-in browser evaluator is being used instead — it is much weaker and much slower, so treat the numbers as indicative only. '+
+      'For real engine numbers, serve the folder over http (e.g. "npx serve" or "python -m http.server") and open the file from http://localhost.'
+    : 'Stockfish could not start ('+engineErr+'). The built-in browser evaluator is being used instead — it is much weaker and much slower.';
+  const b=$('errBox');
+  b.textContent=msg;
+  b.style.display='block';
+}
+
+const PVALS={p:100,n:320,b:330,r:500,q:900,k:0};
+function materialScore(game){
+  let s=0;
+  game.board().forEach(row=>row.forEach(sq=>{ if(sq) s += (sq.color==='w'?1:-1)*PVALS[sq.type]; }));
+  return s; // white perspective
+}
+function materialCount(fen,color){
+  const g=new Chess(fen); let s=0;
+  g.board().forEach(row=>row.forEach(sq=>{ if(sq && sq.color===color) s+=PVALS[sq.type]; }));
+  return s;
+}
+// ---------------------------------------------------------------------------
+// The fallback search runs on the MAIN THREAD, so every part of it is bounded:
+// a wall-clock deadline polled from tick(), a transposition table so the short
+// time slices are not wasted, and a driver that hands control back to the
+// browser between depth iterations.
+//
+// The previous version searched a fixed depth 4 with no deadline, no
+// transposition table and a 3-deep quiescence loop on every leaf, then
+// re-searched the whole tree once per PV move. One position took minutes of
+// solid CPU, so the moment Stockfish failed to start the tab froze solid and
+// looked exactly like a crash.
+//
+// This version adds killer-move and history-heuristic move ordering, null-move
+// pruning, and a second root line (so the fallback can populate an
+// "alternatives" line just like Stockfish's MultiPV, letting the only-move /
+// missed-win / great-move rules keep working even without a real engine). The
+// depth the person picks in the Engine depth dropdown now actually changes how
+// hard the fallback tries, instead of always running a fixed depth 4.
+// ---------------------------------------------------------------------------
+const FALLBACK_MAX_DEPTH=6;      // plies; the safe ceiling on a main-thread search
+const FALLBACK_MIN_DEPTH=3;      // never search shallower than this, even on the fastest setting
+const FALLBACK_SLICE_MS=200;     // base time per depth iteration, so the UI keeps painting
+const FALLBACK_TT_MAX=200000;    // entries before the table is dropped wholesale
+const FALLBACK_NULLMOVE_R=2;     // null-move reduction
+
+let ttTable=new Map(), ttNodes=0, ttDeadline=0, ttAbort=false;
+let killers=[], history={};      // move-ordering heuristics, reset per position search
+const clock=()=> (typeof performance!=='undefined' && performance.now) ? performance.now() : Date.now();
+function tick(){
+  if((++ttNodes & 511)===0 && clock()>=ttDeadline) ttAbort=true;
+}
+const MVV_LVA={p:100,n:320,b:330,r:500,q:900,k:0};
+// Higher = tried earlier. TT move first, then captures by MVV-LVA, then
+// promotions, then the two killer (quiet, beta-cutoff-causing) moves for this
+// ply, then whatever quiet move has the best history score.
+function moveOrder(m,ttMove,ply){
+  if(ttMove && m.from===ttMove.slice(0,2) && m.to===ttMove.slice(2,4)) return 1e7;
+  if(m.captured) return 1e5+MVV_LVA[m.piece]-MVV_LVA[m.captured];
+  if(m.promotion) return 9e4;
+  const k=killers[ply];
+  if(k){
+    if(k[0] && m.from===k[0].from && m.to===k[0].to) return 8e4;
+    if(k[1] && m.from===k[1].from && m.to===k[1].to) return 7.9e4;
+  }
+  return history[m.from+m.to]||0;
+}
+function recordCutoff(m,ply,depth){
+  // Called when a quiet move causes a beta cutoff, so it gets tried earlier
+  // next time a sibling position reaches the same ply or repeats this move.
+  if(m.captured) return;
+  const k=killers[ply]||(killers[ply]=[null,null]);
+  if(!(k[0] && k[0].from===m.from && k[0].to===m.to)){ k[1]=k[0]; k[0]={from:m.from,to:m.to}; }
+  const hk=m.from+m.to;
+  history[hk]=(history[hk]||0)+depth*depth;
+}
+function nonPawnMaterial(game,color){
+  let s=0;
+  game.board().forEach(row=>row.forEach(sq=>{ if(sq&&sq.color===color&&sq.type!=='p'&&sq.type!=='k') s+=PVALS[sq.type]; }));
+  return s;
+}
+function nullMoveFen(fen){
+  // Hands the move to the opponent without playing one, to test "is my
+  // position so good that even skipping a turn keeps it winning?". chess.js
+  // has no built-in null move, so this just flips the side to move and clears
+  // the en-passant square (which a null move would forfeit anyway).
+  const parts=fen.split(' ');
+  parts[1]=parts[1]==='w'?'b':'w';
+  parts[3]='-';
+  return parts.join(' ');
+}
+
+
+// Stand-pat inside the capture loop: plain material only, because this is the
+// hottest path in the fallback search.
+function sideScore(game){ const s=materialScore(game); return game.turn()==='w'?s:-s; }
+function quiesce(game,alpha,beta,depth){
+  tick(); if(ttAbort) return alpha;
+  const stand=sideScore(game);
+  if(stand>=beta) return beta;
+  if(alpha<stand) alpha=stand;
+  if(depth<=0) return alpha;
+  const caps=game.moves({verbose:true}).filter(m=>m.captured)
+                 .sort((a,b)=>moveOrder(b)-moveOrder(a));
+  for(const m of caps){
+    game.move(m.san);
+    const score=-quiesce(game,-beta,-alpha,depth-1);
+    game.undo();
+    if(ttAbort) return alpha;
+    if(score>=beta) return beta;
+    if(score>alpha) alpha=score;
+  }
+  return alpha;
+}
+
+// ---------------------------------------------------------------------------
+// Fallback evaluator. Only used when the Stockfish worker cannot start, but it
+// is a real tapered evaluation (piece-square tables, pawn structure, rook files,
+// bishop pair, king shelter) plus an alpha-beta search with a transposition
+// table, null-move pruning, and killer-move/history move ordering, so the
+// accuracy model downstream still receives the same shape of engine data —
+// including a second line for the classifier's only-move / missed-win /
+// great-move rules.
+// ---------------------------------------------------------------------------
+const PST={
+ p:[0,0,0,0,0,0,0,0, 50,50,50,50,50,50,50,50, 10,10,20,30,30,20,10,10, 5,5,10,25,25,10,5,5,
+    0,0,0,20,20,0,0,0, 5,-5,-10,0,0,-10,-5,5, 5,10,10,-20,-20,10,10,5, 0,0,0,0,0,0,0,0],
+ n:[-50,-40,-30,-30,-30,-30,-40,-50, -40,-20,0,0,0,0,-20,-40, -30,0,10,15,15,10,0,-30,
+    -30,5,15,20,20,15,5,-30, -30,0,15,20,20,15,0,-30, -30,5,10,15,15,10,5,-30,
+    -40,-20,0,5,5,0,-20,-40, -50,-40,-30,-30,-30,-30,-40,-50],
+ b:[-20,-10,-10,-10,-10,-10,-10,-20, -10,0,0,0,0,0,0,-10, -10,0,5,10,10,5,0,-10,
+    -10,5,5,10,10,5,5,-10, -10,0,10,10,10,10,0,-10, -10,10,10,10,10,10,10,-10,
+    -10,5,0,0,0,0,5,-10, -20,-10,-10,-10,-10,-10,-10,-20],
+ r:[0,0,0,0,0,0,0,0, 5,10,10,10,10,10,10,5, -5,0,0,0,0,0,0,-5, -5,0,0,0,0,0,0,-5,
+    -5,0,0,0,0,0,0,-5, -5,0,0,0,0,0,0,-5, -5,0,0,0,0,0,0,-5, 0,0,0,5,5,0,0,0],
+ q:[-20,-10,-10,-5,-5,-10,-10,-20, -10,0,0,0,0,0,0,-10, -10,0,5,5,5,5,0,-10,
+    -5,0,5,5,5,5,0,-5, 0,0,5,5,5,5,0,-5, -10,5,5,5,5,5,0,-10,
+    -10,0,5,0,0,0,0,-10, -20,-10,-10,-5,-5,-10,-10,-20],
+ k:[-30,-40,-40,-50,-50,-40,-40,-30, -30,-40,-40,-50,-50,-40,-40,-30, -30,-40,-40,-50,-50,-40,-40,-30,
+    -30,-40,-40,-50,-50,-40,-40,-30, -20,-30,-30,-40,-40,-30,-30,-20, -10,-20,-20,-20,-20,-20,-20,-10,
+    20,20,0,0,0,0,20,20, 20,30,10,0,0,10,30,20],
+ ke:[-50,-40,-30,-20,-20,-30,-40,-50, -30,-20,-10,0,0,-10,-20,-30, -30,-10,20,30,30,20,-10,-30,
+    -30,-10,30,40,40,30,-10,-30, -30,-10,30,40,40,30,-10,-30, -30,-10,20,30,30,20,-10,-30,
+    -30,-30,0,0,0,0,-30,-30, -50,-30,-30,-30,-30,-30,-30,-50]
+};
+const PASSED=[0,5,10,20,35,60,100,0];
+function sqIdx(row,col,white){ return (white? row : 7-row)*8+col; }
+// There is deliberately no mobility term in staticEval. chess.js 0.12.1 only
+// generates moves for the side to move and its turn() takes no argument, so the
+// old countMoves(fen,'w')-countMoves(fen,'b') always evaluated to exactly 0 —
+// while still paying for two full move generations on every single leaf.
+function staticEval(board){
+  let mg=0, eg=0, phase=0, bishW=0, bishB=0, rookSq=[], kingSq={};
+  const pawns={w:[],b:[]};
+  for(let r=0;r<8;r++) for(let c=0;c<8;c++){
+    const sq=board[r][c]; if(!sq) continue;
+    const w=sq.color==='w', i=sqIdx(r,c,w), v=(w?1:-1);
+    const table = sq.type==='k' ? PST.k : PST[sq.type];
+    mg += v*(PVALS[sq.type]+table[i]);
+    const etable = sq.type==='k' ? PST.ke : PST[sq.type];
+    eg += v*(PVALS[sq.type]+etable[i]);
+    if(sq.type==='q') phase+=4;
+    else if(sq.type==='r') phase+=2;
+    else if(sq.type==='b'||sq.type==='n') phase++;
+    if(sq.type==='b'){ if(w) bishW++; else bishB++; }
+    if(sq.type==='r') rookSq.push({r,c,w});
+    if(sq.type==='k') kingSq[sq.color]={r,c};
+    if(sq.type==='p') pawns[sq.color].push({r,c});
+  }
+  phase=Math.min(24,phase);
+  let score=(mg*phase+eg*(24-phase))/24;
+  if(bishW>=2) score+=35;
+  if(bishB>=2) score-=35;
+  // pawn structure + rook files
+  for(const col of ['w','b']){
+    const v=(col==='w'?1:-1);
+    const files={};
+    for(const p of pawns[col]) files[p.c]=(files[p.c]||0)+1;
+    for(const c in files){
+      if(files[c]>1) score+=v*(-12*(files[c]-1));
+      if(!files[c-1]&&!files[c+1]) score+=v*(-15);
+    }
+    for(const p of pawns[col]){
+      const rank=8-p.r;
+      let blocked=false;
+      for(const q of pawns[col==='w'?'b':'w'])
+        if(Math.abs(q.c-p.c)<=1 && (col==='w'? q.r<p.r : q.r>p.r)){ blocked=true; break; }
+      if(!blocked) score+=v*PASSED[Math.max(0,Math.min(7,rank-1))];
+    }
+  }
+  for(const rs of rookSq){
+    const v=rs.w?1:-1;
+    const own=pawns[rs.w?'w':'b'].some(p=>p.c===rs.c);
+    const foe=pawns[rs.w?'b':'w'].some(p=>p.c===rs.c);
+    if(!own&&!foe) score+=v*20; else if(!own) score+=v*10;
+  }
+  // king shelter: friendly pawns in front of the king
+  for(const col of ['w','b']){
+    const k=kingSq[col]; if(!k) continue;
+    const v=(col==='w'?1:-1);
+    let shield=0;
+    for(const p of pawns[col]){
+      const dr = col==='w'? (k.r-p.r) : (p.r-k.r);   // pawns between the king and its own side
+      if(dr>0&&dr<=2&&Math.abs(p.c-k.c)<=1) shield++;
+    }
+    score+=v*Math.min(3,shield)*8;
+  }
+  return Math.max(-3000,Math.min(3000,score));
+}
+const MATE_SCORE=30000;
+function negamax(game,depth,alpha,beta,ply){
+  tick(); if(ttAbort) return 0;
+  if(depth<=0){
+    // One tapered evaluation per leaf, then the cheap material stand-pat search.
+    const s=staticEval(game.board());
+    if(s>=beta) return beta;
+    if(s>alpha) alpha=s;
+    return quiesce(game,alpha,beta,2);
+  }
+  const key=game.fen();
+  const alphaOrig=alpha;
+  let ttMove=null;
+  const hit=ttTable.get(key);
+  if(hit){
+    ttMove=hit.m;
+    // Mate scores are ply-relative, so they are only trusted for an exact hit.
+    if(hit.d>=depth && Math.abs(hit.s)<MATE_SCORE-1000){
+      if(hit.f===0) return hit.s;
+      if(hit.f===1 && hit.s>alpha) alpha=hit.s;
+      else if(hit.f===2 && hit.s<beta) beta=hit.s;
+      if(alpha>=beta) return hit.s;
+    }
+  }
+  // Null-move pruning: if passing the move entirely still leaves the side to
+  // move doing fine, a real move will only do better, so this branch is
+  // unlikely to matter — skip it early. Guarded against check (illegal to
+  // pass) and against pawn/king-only endgames, where passing can be uniquely
+  // bad (zugzwang) and would give a false cutoff.
+  if(depth>=3 && beta<MATE_SCORE-100 && !game.in_check() && nonPawnMaterial(game,game.turn())>=500){
+    const ng=new Chess(nullMoveFen(key));
+    const nullVal=-negamax(ng,depth-1-FALLBACK_NULLMOVE_R,-beta,-beta+1,ply+1);
+    if(!ttAbort && nullVal>=beta) return beta;
+  }
+  const moves=game.moves({verbose:true});
+  if(moves.length===0) return game.in_checkmate()? -MATE_SCORE+ply : 0;
+  moves.sort((a,b)=>moveOrder(b,ttMove,ply)-moveOrder(a,ttMove,ply));
+  let best=-Infinity, bestMove=null;
+  for(const m of moves){
+    game.move(m.san);
+    const val=-negamax(game,depth-1,-beta,-alpha,ply+1);
+    game.undo();
+    if(ttAbort) break;
+    if(val>best){ best=val; bestMove=m.from+m.to+(m.promotion||''); }
+    if(val>alpha) alpha=val;
+    if(alpha>=beta){ recordCutoff(m,ply,depth); break; }
+  }
+  if(!ttAbort && best>-Infinity){
+    ttTable.set(key,{d:depth,s:best,m:bestMove,f:best<=alphaOrig?2:(best>=beta?1:0)});
+    if(ttTable.size>FALLBACK_TT_MAX) ttTable.clear();
+  }
+  return best===-Infinity? 0 : best;
+}
+// One fixed-depth root search, hard-capped at msLimit ms. Returns null only when
+// the position has no legal moves at all. Also tracks the second-best root
+// move (a poor man's MultiPV=2), so the fallback engine can offer an
+// "alternatives" line just like Stockfish does, which the only-move,
+// missed-win and great-move rules all depend on.
+function searchRoot(fen,depth,msLimit){
+  const g=new Chess(fen);
+  const moves=g.moves({verbose:true});
+  if(moves.length===0) return null;
+  ttAbort=false; ttDeadline=clock()+msLimit;
+  const ttMove=(ttTable.get(fen)||{}).m||null;
+  const ordered=moves.slice().sort((a,b)=>moveOrder(b,ttMove,0)-moveOrder(a,ttMove,0));
+  let best=-Infinity, bestMove=null, second=-Infinity, secondMove=null;
+  for(const m of ordered){
+    g.move(m.san);
+    const val=-negamax(g,depth-1,-3000,3000,1);
+    g.undo();
+    if(ttAbort) break;
+    if(val>best){ second=best; secondMove=bestMove; best=val; bestMove=m; }
+    else if(val>second){ second=val; secondMove=m; }
+  }
+  // The very first slice can run out of time before a single root move
+  // finishes; fall back to a static score so a legal move is always returned.
+  if(!bestMove){ bestMove=ordered[0]; best=staticEval(g.board()); }
+  return {score:Math.max(-3000,Math.min(3000,best)), move:bestMove, aborted:ttAbort, depth,
+          second: secondMove? {score:Math.max(-3000,Math.min(3000,second)), move:secondMove} : null};
+}
+const yieldToUI=()=>new Promise(r=>setTimeout(r,0));
+// Iterative deepening, one depth per task, so the progress bar and the board
+// keep updating instead of the tab going unresponsive. requestedDepth is the
+// depth the person chose in the Engine depth dropdown (meant for Stockfish);
+// it is mapped into a small, safe range here rather than ignored, so asking
+// for a deeper analysis still buys a deeper — and slower — fallback search.
+async function localSearch(fen,requestedDepth){
+  const targetDepth=Math.max(FALLBACK_MIN_DEPTH,
+    Math.min(FALLBACK_MAX_DEPTH, Math.round((requestedDepth||8)/2)));
+  const sliceMs=FALLBACK_SLICE_MS + targetDepth*40;
+  killers=[]; history={};
+  let result=null;
+  for(let d=1; d<=targetDepth; d++){
+    const r=searchRoot(fen,d,sliceMs);
+    if(r) result=r;
+    if(r && r.aborted) break;
+    await yieldToUI();
+  }
+  if(!result) return {cp:0, best:null, pv:[], depth:0, second:null};
+  return {cp:result.score, best:result.move.san, pv:[result.move.san], depth:result.depth,
+          second: result.second? {cp:result.second.score, best:result.second.move.san} : null};
+}
+
+const OPENINGS=[
+  {name:'Ruy Lopez',variation:'Morphy Defense',moves:['e4','e5','Nf3','Nc6','Bb5','a6']},
+  {name:'Ruy Lopez',variation:'',moves:['e4','e5','Nf3','Nc6','Bb5']},
+  {name:'Italian Game',variation:'Giuoco Piano',moves:['e4','e5','Nf3','Nc6','Bc4','Bc5']},
+  {name:'Italian Game',variation:'',moves:['e4','e5','Nf3','Nc6','Bc4']},
+  {name:'Sicilian Defense',variation:'Najdorf',moves:['e4','c5','Nf3','d6','d4','cxd4','Nxd4','Nf6','Nc3','a6']},
+  {name:'Sicilian Defense',variation:'Open',moves:['e4','c5','Nf3','d6','d4','cxd4','Nxd4']},
+  {name:'Sicilian Defense',variation:'',moves:['e4','c5']},
+  {name:'French Defense',variation:'',moves:['e4','e6']},
+  {name:'Caro-Kann Defense',variation:'',moves:['e4','c6']},
+  {name:'Scandinavian Defense',variation:'',moves:['e4','d5']},
+  {name:'Pirc Defense',variation:'',moves:['e4','d6','d4','Nf6']},
+  {name:"King's Pawn Game",variation:'',moves:['e4','e5']},
+  {name:"Queen's Gambit Declined",variation:'',moves:['d4','d5','c4','e6']},
+  {name:"Queen's Gambit Accepted",variation:'',moves:['d4','d5','c4','dxc4']},
+  {name:'Slav Defense',variation:'',moves:['d4','d5','c4','c6']},
+  {name:"King's Indian Defense",variation:'',moves:['d4','Nf6','c4','g6']},
+  {name:'Nimzo-Indian Defense',variation:'',moves:['d4','Nf6','c4','e6','Nc3','Bb4']},
+  {name:'Grunfeld Defense',variation:'',moves:['d4','Nf6','c4','g6','Nc3','d5']},
+  {name:'London System',variation:'',moves:['d4','d5','Bf4']},
+  {name:'English Opening',variation:'',moves:['c4']},
+  {name:'Vienna Game',variation:'',moves:['e4','e5','Nc3']},
+  {name:"Queen's Pawn Game",variation:'',moves:['d4','d5']}
+];
+function detectOpening(sans){
+  let best=null;
+  for(const o of OPENINGS){
+    if(o.moves.length>sans.length) continue;
+    let match=true;
+    for(let i=0;i<o.moves.length;i++) if(sans[i]!==o.moves[i]){ match=false; break; }
+    if(match && (!best || o.moves.length>best.moves.length)) best=o;
+  }
+  return best;
+}
+// ---------------------------------------------------------------------------
+// UCI search layer. One search at a time, N lines per position (MultiPV), so
+// the classifier can compare the played move with the engine's #1 and #2 lines.
+// ---------------------------------------------------------------------------
+function parseInfoLine(line){
+  if(!line.startsWith('info')) return null;
+  if(/lowerbound|upperbound/.test(line)) return null;      // aspiration noise
+  const d=/\bdepth (\d+)/.exec(line); if(!d) return null;
+  const s=/\bscore (cp|mate) (-?\d+)/.exec(line); if(!s) return null;
+  const mv=/\bmultipv (\d+)/.exec(line);
+  const pv=/\bpv (.+)$/.exec(line);
+  return { depth:+d[1], type:s[1], value:+s[2], multipv:mv?+mv[1]:1,
+           pv:pv? pv[1].trim().split(/\s+/).slice(0,12) : [] };
+}
+function sfSearch(fen,depth,movetime){
+  return new Promise(resolve=>{
+    const lines=new Map();
+    let done=false, bestUci=null;
+    const finish=timedOut=>{
+      if(done) return;
+      done=true; clearTimeout(timer); searchSink=null;
+      resolve({ lines:[...lines.values()].sort((a,b)=>a.multipv-b.multipv),
+                bestMove:bestUci, timedOut });
+    };
+    const timer=setTimeout(()=>{ try{ sf.postMessage('stop'); }catch(e){} finish(true); }, movetime);
+    searchSink={
+      onInfo:p=>{
+        const prev=lines.get(p.multipv);
+        if(!prev || p.depth>=prev.depth) lines.set(p.multipv,p);
+      },
+      onBest:bm=>{ bestUci=bm; finish(false); }
+    };
+    sf.postMessage('position fen '+fen);
+    sf.postMessage('go depth '+depth+(movetime?' movetime '+movetime:''));
+  });
+}
+function sanFromUci(fen,uci){
+  if(!uci || uci==='(none)') return null;
+  const g=new Chess(fen);
+  const from=uci.slice(0,2), to=uci.slice(2,4), promo=uci.length>4?uci[4]:undefined;
+  // Look the move up in the legal list so castling, en passant and promotion
+  // all round-trip (a raw {from,to} object is not enough for chess.js).
+  const m=g.moves({verbose:true}).find(x=>x.from===from && x.to===to &&
+                   (promo===undefined || x.promotion===promo));
+  if(!m) return null;
+  const played=g.move(m.san);
+  return played? played.san : null;
+}
+function pvToSan(fen,pv,max){
+  const g=new Chess(fen), out=[];
+  for(const uci of (pv||[]).slice(0,max||8)){
+    const san=sanFromUci(g.fen(),uci);
+    if(!san) break;
+    out.push(san);
+    try{ g.move(san); }catch(e){ break; }
+  }
+  return out;
+}
+function lineW(l){ return l.type==='mate' ? mateWinPct(l.value) : winPct(l.value); }
+function packEval(fen,lines,bestUci,timedOut,source){
+  if(!lines.length) return null;
+  const turn=fen.split(' ')[1];
+  const L0=lines[0];
+  const wMover=lineW(L0);
+  return {
+    turn, source, depth:L0.depth, timedOut:!!timedOut,
+    cp: L0.type==='cp'? L0.value : null,
+    mate: L0.type==='mate'? L0.value : null,
+    wMover,                                        // win% for the side to move
+    wWhite: turn==='w'? wMover : 100-wMover,       // win% from White's side
+    wCp: L0.type==='cp'? (turn==='w'? L0.value : -L0.value) : null,
+    wMate: L0.type==='mate'? (turn==='w'? L0.value : -L0.value) : null,
+    pv: L0.pv,
+    pvSan: pvToSan(fen,L0.pv,10),
+    bestSan: sanFromUci(fen,(bestUci||L0.pv[0]||'')),
+    alternatives: lines.slice(1).map(l=>({
+      multipv:l.multipv, wMover:lineW(l), san:sanFromUci(fen,l.pv[0]||''),
+      pvSan: pvToSan(fen,l.pv,8)
+    }))
+  };
+}
+function packFallback(fen,r,note,timedOut){
+  const lines=[{type:'cp',value:r.cp,multipv:1,depth:r.depth||FALLBACK_MAX_DEPTH,
+                pv:r.best?[uciOf(fen,r.best)]:[]}];
+  // A second root line, when the search found one, mirrors Stockfish's
+  // MultiPV=2 so the classifier's only-move / missed-win / great-move rules —
+  // which all read lines[1] — keep working when Stockfish itself is down.
+  if(r.second && r.second.best){
+    lines.push({type:'cp',value:r.second.cp,multipv:2,depth:r.depth||FALLBACK_MAX_DEPTH,
+                pv:[uciOf(fen,r.second.best)]});
+  }
+  return packEval(fen,lines,
+                  null,!!timedOut,'built-in evaluator, JS depth '+(r.depth||FALLBACK_MAX_DEPTH)+(note?' ('+note+')':''));
+}
+async function evalPosition(fen,depth){
+  if(usingFallback || !sf) return packFallback(fen, await localSearch(fen,depth), '', false);
+  const budget=1500+depth*250;
+  const res=await sfSearch(fen,depth,budget);
+  // The version and the search depth used to be concatenated into one
+  // "Stockfish 10" string, which read as a version number but was actually the
+  // depth. They are now labelled separately so the provenance line cannot be
+  // misread.
+  const packed=packEval(fen,res.lines,res.bestMove,res.timedOut,
+                        'Stockfish 10.0.2, depth '+(res.lines[0]?res.lines[0].depth:depth));
+  if(packed) return packed;
+  // The engine accepted the position but produced no usable line. Score this
+  // position with the JS fallback and count it, so a systematically dead
+  // engine can never masquerade as a working one.
+  sfNoLines++;
+  return packFallback(fen, await localSearch(fen,depth), 'Stockfish returned no lines', true);
+}
+function uciOf(fen,san){
+  const g=new Chess(fen);
+  try{ const m=g.move(san,{sloppy:true}); const san2=m?m.san:san; const back=new Chess(fen); const mv=back.move(san2,{sloppy:true});
+       return mv? mv.from+mv.to+(mv.promotion||'') : ''; }catch(e){ return ''; }
+}
+
+// ---------------------------------------------------------------------------
+// Accuracy + classification model. Every threshold lives in TUNE and is printed
+// verbatim into the on-page spec table, so the numbers shown can never drift
+// away from the numbers used.
+// ---------------------------------------------------------------------------
+const TUNE={
+  perfectWpl:2.7, perfectCp:20,
+  excWpl:5, excCp:45,
+  goodWpl:10, goodCp:90,
+  inaccWpl:20, inaccCp:200,
+  mistakeWpl:30, mistakeCp:600,
+  onlyMoveGap:8,
+  wonAt:60,
+  greatWpl:5, greatSavedAt:45,
+  brillSac:200, brillWpl:3, brillCp:30, brillFloor:20,
+  missWpl:10,
+  sacBlunder:300,
+  matePenalty:800,
+  lowMaterialCp:1000
+};
+const LABELS={
+  book:       {label:'Book',        cls:'tag-book',  sym:''},
+  brill:      {label:'Brilliant',   cls:'tag-brill', sym:'!!'},
+  great:      {label:'Great',       cls:'tag-great', sym:'!'},
+  best:       {label:'Best',        cls:'tag-best',  sym:'✓'},
+  exc:        {label:'Excellent',   cls:'tag-exc',   sym:''},
+  good:       {label:'Good',        cls:'tag-good',  sym:''},
+  inacc:      {label:'Inaccuracy',  cls:'tag-inacc', sym:'?!'},
+  miss:       {label:'Missed win',  cls:'tag-miss',  sym:'×'},
+  mistake:    {label:'Mistake',     cls:'tag-mist',  sym:'??'},
+  blunder:    {label:'Blunder',     cls:'tag-blun',  sym:'?!!'},
+  missedMate: {label:'Missed mate', cls:'tag-miss',  sym:'×'},
+  allowedMate:{label:'Gave a mate', cls:'tag-blun',  sym:'?!!'}
+};
+const TIERS=['brill','great','best','exc','good','inacc','miss','mistake','blunder','missedMate','allowedMate','book'];
+
+function winPct(cp){ return 50+50*(2/(1+Math.exp(-0.00368208*Math.max(-3000,Math.min(3000,cp))))-1); }
+function mateWinPct(mateMoves){
+  const d=Math.max(1,Math.abs(mateMoves));
+  return Math.max(50,Math.min(98,100-2*(d-1)));   // mate in 1 = 98%, decaying 2% per move
+}
+function moveAcc(wpl){ const a=103.1668*Math.exp(-0.04354*Math.max(0,wpl))-3.1669; return Math.min(100,Math.max(0,a)); }
+function normSan(s){ return normalizeSANForCompare(s); }
+
+// ---------------------------------------------------------------------------
+// Volatility-weighted game accuracy. A plain average of per-move accuracy
+// treats a slip in a dead-drawn position the same as one in a razor-sharp
+// position, which is not how strength is actually judged. Instead each move
+// is weighted by how much the win% was swinging locally (its standard
+// deviation over a small window around that move): calm, already-decided
+// stretches count for less, and tense, high-stakes stretches count for more.
+// The final figure blends a weighted mean with a weighted harmonic mean —
+// the harmonic side punishes a single bad move in an otherwise steady game
+// more than a plain weighted mean would, matching how a human reviewer would
+// judge "one blunder ruined an otherwise accurate game".
+// ---------------------------------------------------------------------------
+function stdev(arr){
+  const n=arr.length; if(!n) return 0;
+  const m=arr.reduce((a,b)=>a+b,0)/n;
+  return Math.sqrt(arr.reduce((a,b)=>a+(b-m)*(b-m),0)/n);
+}
+function volatilityWeights(mine){
+  // mine: every ply for one side, in game order (played or not, counted or not) —
+  // the win% timeline needs the full sequence to judge local volatility correctly.
+  const wp = mine.map(p=>p.beforeWP);
+  if(mine.length) wp.push(mine[mine.length-1].afterWP);
+  const n = wp.length;
+  const win = Math.max(2, Math.min(8, Math.round(n/10)));
+  return mine.map((p,j)=>{
+    const lo=Math.max(0,j-win), hi=Math.min(n-1,j+win);
+    return Math.min(12, Math.max(0.5, stdev(wp.slice(lo,hi+1))));
+  });
+}
+function weightedAccuracy(mine){
+  if(!mine.length) return null;
+  const weights = volatilityWeights(mine);
+  let wsum=0, wmean=0, hsum=0, hmean=0, any=false;
+  mine.forEach((p,j)=>{
+    if(!p.count) return;
+    any=true;
+    const w=weights[j], a=Math.max(0.1,p.acc);
+    wsum+=w; wmean+=w*a;
+    hsum+=w; hmean+=w/a;
+  });
+  if(!any || !wsum) return null;
+  return (wmean/wsum + hsum/hmean)/2;
+}
+
+function isDeadPosition(fen){
+  const g=new Chess(fen);
+  if(g.in_checkmate()||g.in_stalemate()) return true;
+  try{ const v=g.insufficient_material; return (typeof v==='function')? !!v.call(g) : !!v; }catch(e){ return false; }
+}
+function isLowMaterial(fen){
+  const g=new Chess(fen);
+  let pawns=0, other=0;
+  g.board().forEach(row=>row.forEach(sq=>{
+    if(!sq||sq.type==='k') return;
+    if(sq.type==='p') pawns++; else other+=PVALS[sq.type];
+  }));
+  return pawns===0 && other<=TUNE.lowMaterialCp;
+}
+function materialSwing(fenA,fenB,side){
+  return materialCount(fenA,side)-materialCount(fenB,side); // >0 = mover gave up material
+}
+function classifyPly(p){
+  const T=TUNE;
+  if(p.book) return 'book';
+  if(p.flags.missedMate) return 'missedMate';
+  if(p.flags.allowedMate) return 'allowedMate';
+  if(p.mates){
+    // The engine finds every mate in one, so a delivered mate is only Brilliant
+    // when it cost material to get there.
+    if(p.sac>=T.brillSac && p.wpl<=T.brillWpl) return 'brill';
+    return 'best';
+  }
+  if(p.flags.escapedMate && p.wpl<=T.greatWpl) return 'great';
+  if(p.sac>=T.brillSac && p.wpl<=T.brillWpl && p.cpLoss<=T.brillCp && p.afterMoverCp>=T.brillFloor) return 'brill';
+  const rescued = p.wpl<=T.greatWpl && p.beforeWP<=T.greatSavedAt && p.afterWP>=20 && p.afterWP>=p.beforeWP-1;
+  const held    = p.wpl<=T.greatWpl && p.beforeWP>=T.wonAt && p.altWpl!==null && p.altWpl>=T.missWpl;
+  if(rescued||held) return 'great';
+  if(p.playedIsTop1 || (p.wpl<=T.perfectWpl && p.cpLoss<=T.perfectCp)) return 'best';
+  if(p.wpl<=T.excWpl || p.cpLoss<=T.excCp) return 'exc';
+  if(p.wpl<=T.goodWpl || p.cpLoss<=T.goodCp) return 'good';
+  if(p.sac>=T.sacBlunder && p.wpl>=T.goodWpl) return 'blunder';
+  // A clearly winning position that gets thrown away is reported as a missed
+  // win rather than a plain inaccuracy, so it is checked before the buckets.
+  if(p.beforeWP>=T.wonAt && p.wpl>=T.missWpl) return 'miss';
+  if(p.wpl<=T.inaccWpl || p.cpLoss<=T.inaccCp) return 'inacc';
+  if(p.wpl<=T.mistakeWpl || p.cpLoss<=T.mistakeCp) return 'mistake';
+  return 'blunder';
+}
+function buildPlyRecords(){
+  const out=[];
+  for(let i=0;i<sanList.length;i++){
+    const side=fenList[i].split(' ')[1];
+    const b=evals[i], a=evals[i+1]||evals[i];
+    const beforeWP=b.wMover;                  // win% of the player about to move
+    const afterWP=100-a.wMover;               // ... after the move (it is the opponent's turn)
+    const wpl=Math.max(0,Math.min(100,beforeWP-afterWP));
+    const flags={};
+    let cpLoss=0;
+    if(b.mate!==null && b.mate>0){
+      if(a.mate!==null && a.mate<0) flags.keepsMate=true; else flags.missedMate=true;
+    }else if(b.mate!==null && b.mate<0){
+      if(a.mate===null) flags.escapedMate=true;
+      else if(a.mate<0) flags.stillMated=true;
+      else flags.allowedMate=true;
+    }else if(a.mate!==null && a.mate>0){
+      flags.allowedMate=true;
+    }
+    if(flags.missedMate||flags.allowedMate) cpLoss=TUNE.matePenalty;
+    else if(flags.escapedMate||flags.keepsMate) cpLoss=0;
+    else if(b.mate!==null && a.mate!==null) cpLoss=Math.max(0,10*(Math.abs(a.mate)-Math.abs(b.mate)));
+    else if(b.cp!==null && a.cp!==null) cpLoss=Math.max(0,b.cp+a.cp);   // mover POV before + opponent POV after
+    const alt=b.alternatives[0]||null;
+    const altWpl=alt?Math.max(0,beforeWP-alt.wMover):null;
+    const gap=alt?Math.max(0,beforeWP-alt.wMover):0;
+    let forced=false, unavoidable=false;
+    if(alt && gap>=TUNE.onlyMoveGap){
+      if(wpl<=Math.max(4,altWpl+2)) forced=true;
+      if(altWpl>=TUNE.inaccWpl && wpl>=TUNE.inaccWpl) unavoidable=true;
+    }
+    const played=normSan(sanList[i]);
+    const altSans=[b.bestSan].concat(b.alternatives.map(x=>x.san)).filter(Boolean).map(normSan);
+    const p={
+      i, side, san:sanList[i],
+      beforeWP, afterWP, wpl, cpLoss,
+      sac: materialSwing(fenList[i],fenList[i+1],side),
+      beforeMoverCp: b.cp, afterMoverCp: a.cp!==null? -a.cp : null,
+      mateBefore: b.mate, mateAfter: a.mate, flags,
+      altWpl, gap, forced, unavoidable,
+      playedIsTop1: altSans[0]===played,
+      playedIsTop3: altSans.indexOf(played)>=0,
+      bestSan: b.bestSan, altSan: alt?alt.san:null,
+      pvBefore: b.pvSan, pvAfter: a.pvSan,
+      evalBefore: b, evalAfter: a,
+      source: b.source, depth: b.depth, timedOut: b.timedOut,
+      book: i<bookPlies,
+      lowMat: isLowMaterial(fenList[i]),
+      over: isDeadPosition(fenList[i]),
+      mates: !!matesAt[i]
+    };
+    p.label=classifyPly(p);
+    p.count = !p.book && !p.forced && !p.unavoidable && !p.lowMat && !p.over;
+    p.acc = p.count? moveAcc(p.wpl) : null;
+    out.push(p);
+  }
+  return out;
+}
+function sideStats(side){
+  const mine=plies.filter(p=>p.side===side);
+  const counted=mine.filter(p=>p.count);
+  const decisive=counted.filter(p=>p.wpl>0||(p.altWpl!==null&&p.altWpl>0));
+  const cpRows=counted.filter(p=>p.cpLoss!==TUNE.matePenalty);
+  const plainAcc=counted.length? counted.reduce((a,p)=>a+p.acc,0)/counted.length : null;
+  const acc=weightedAccuracy(mine);
+  const decAcc=decisive.length? decisive.reduce((a,p)=>a+p.acc,0)/decisive.length : null;
+  const acpl=cpRows.length? cpRows.reduce((a,p)=>a+p.cpLoss,0)/cpRows.length : null;
+  const avgW=counted.length? counted.reduce((a,p)=>a+p.wpl,0)/counted.length : null;
+  const top1=counted.length? counted.filter(p=>p.playedIsTop1).length/counted.length*100 : null;
+  const top3=counted.length? counted.filter(p=>p.playedIsTop3).length/counted.length*100 : null;
+  const counts={};
+  TIERS.forEach(t=>counts[t]=0);
+  mine.forEach(p=>counts[p.label]++);
+  return {
+    counts, counted:counted.length, total:mine.length,
+    excluded:{ book:mine.filter(p=>p.book).length,
+               forced:mine.filter(p=>p.forced).length,
+               unavoidable:mine.filter(p=>p.unavoidable).length,
+               endgame:mine.filter(p=>p.lowMat).length,
+               over:mine.filter(p=>p.over).length },
+    acc, plainAcc, decAcc, acpl, avgW, top1, top3,
+    worst: counted.slice().sort((a,b)=>b.wpl-a.wpl)[0]||null
+  };
+}
+
+function renderBoard(fen){
+  const rows=fen.split(' ')[0].split('/');
+  const b=$('board'); b.innerHTML='';
+  for(let r=0;r<8;r++){
+    let c=0;
+    for(const ch of rows[r]){
+      if(/\d/.test(ch)){ for(let i=0;i<+ch;i++){ addSq(r,c,'',false); c++; } }
+      else { addSq(r,c,PIECES[ch]||'', ch===ch.toUpperCase()); c++; }
+    }
+  }
+  function addSq(r,c,pid,isWhite){
+    const d=document.createElement('div');
+    d.className='sq '+(((r+c)%2===0)?'l':'d');
+    if(pid) d.innerHTML=`<svg class="${isWhite?'wp':'bp'}" viewBox="0 0 45 45"><use href="#${pid}"/></svg>`;
+    b.appendChild(d);
+  }
+}
+
+function renderMoveList(){
+  const ml=$('moveList'); ml.innerHTML=''; ml.style.display='block';
+  let html='';
+  for(let i=0;i<sanList.length;i++){
+    const moveNo = Math.floor(i/2)+1;
+    const prefix = (i%2===0)? moveNo+'. ' : '';
+    const p = plies[i];
+    const L = p? LABELS[p.label] : null;
+    const sym = L&&L.sym? `<sup class="sym ${L.cls}">${L.sym}</sup>` : '';
+    html += `<span class="mv ${L?L.cls:''}" data-ply="${i+1}" title="${L?L.label:''}${p&&p.count?'':' (not counted in accuracy)'}">${prefix}${sanList[i]}${sym}</span> `;
+  }
+  ml.innerHTML=html;
+  ml.querySelectorAll('.mv').forEach(el=>el.addEventListener('click',()=>{curPly=+el.dataset.ply; refresh();}));
+}
+
+function evalText(e){
+  if(!e) return '–';
+  if(e.wMate!==null && e.wMate!==undefined) return (e.wMate>0?'M':'−M')+Math.abs(e.wMate);
+  if(e.wCp===null||e.wCp===undefined) return '–';
+  return (e.wCp>=0?'+':'')+(e.wCp/100).toFixed(2);
+}
+function moverText(cp,mate){
+  if(mate!==null && mate!==undefined) return (mate>0?'mates in ':'mated in ')+Math.abs(mate);
+  if(cp===null||cp===undefined) return '–';
+  return (cp>=0?'+':'')+(cp/100).toFixed(2);
+}
+
+function refresh(){
+  if(!fenList.length) return;
+  curPly=Math.max(0,Math.min(curPly,fenList.length-1));
+  renderBoard(fenList[curPly]);
+  document.querySelectorAll('.mv').forEach(el=>el.classList.toggle('active', +el.dataset.ply===curPly));
+  const e=evals[curPly];
+  if(e){
+    $('evalFill').style.height=e.wWhite+'%';
+    $('evalLabel').textContent=evalText(e)+'  ('+e.wWhite.toFixed(1)+'%)';
+  }
+  renderDetail();
+}
+
+function renderGraph(){
+  const svg=$('evalSvg'); $('graphBox').style.display='block';
+  const w=600,h=100,n=evals.length;
+  let pts='';
+  for(let i=0;i<n;i++){
+    const x = n<=1?0:(i/(n-1))*w;
+    const y = h - (evals[i].wWhite/100)*h;
+    pts += `${x.toFixed(1)},${y.toFixed(1)} `;
+  }
+  svg.innerHTML = `<rect x="0" y="0" width="${w}" height="${h/2}" fill="#2a2620"/><rect x="0" y="${h/2}" width="${w}" height="${h/2}" fill="#141210"/><polyline points="${pts}" fill="none" stroke="#d9a441" stroke-width="2"/>`;
+}
+
+function fmt(v,d){ return (v===null||v===undefined||isNaN(v))? '–' : v.toFixed(d===undefined?1:d); }
+function pct(v){ return (v===null||v===undefined)? '–' : v.toFixed(1)+'%'; }
+
+function renderSummary(){
+  $('summary').style.display='block';
+  const W=sideStats('w'), B=sideStats('b');
+  $('wAcc').textContent = W.acc!==null? W.acc.toFixed(1)+'%' : '–';
+  $('bAcc').textContent = B.acc!==null? B.acc.toFixed(1)+'%' : '–';
+  const ex=W.excluded, exB=B.excluded;
+  $('accNote').innerHTML =
+    `Volatility-weighted accuracy over <b>${W.counted}</b> White and <b>${B.counted}</b> Black counted plies `+
+    `(plain average: ${pct(W.plainAcc)} / ${pct(B.plainAcc)} — see Engine metrics below). `+
+    `Excluded from the average: theory (${ex.book}/${exB.book}), only-move (${ex.forced}/${exB.forced}), `+
+    `unavoidable (${ex.unavoidable}/${exB.unavoidable}), precision endgames (${ex.endgame}/${exB.endgame}), `+
+    `already-finished positions (${ex.over}/${exB.over}).`;
+  // Full move-classification breakdown — every tier the engine can assign,
+  // for both sides, as counts and as a share of that side's total plies, so
+  // nothing (Great, Brilliant, Miss, Mistake, Blunder, Book, ...) is left out.
+  const grid=$('statsGrid');
+  const totW=W.total||1, totB=B.total||1;
+  let rows='<tr><th>Move type</th><th class="num">White</th><th class="num">Black</th></tr>';
+  TIERS.forEach(k=>{
+    const L=LABELS[k], wc=W.counts[k]||0, bc=B.counts[k]||0;
+    if(!wc && !bc) return; // skip a tier neither side ever received
+    rows+=`<tr><td class="${L.cls}">${L.label}${L.sym?' '+L.sym:''}</td>`+
+          `<td class="num">${wc} <span class="muted">(${(wc/totW*100).toFixed(0)}%)</span></td>`+
+          `<td class="num">${bc} <span class="muted">(${(bc/totB*100).toFixed(0)}%)</span></td></tr>`;
+  });
+  grid.innerHTML = `<table class="mtable">${rows}</table>`;
+  // engine metrics table
+  $('metricBox').style.display='block';
+  const row=(name,fn)=>`<tr><td>${name}</td><td class="num">${fn(W)}</td><td class="num">${fn(B)}</td></tr>`;
+  $('metricTable').innerHTML =
+    `<tr><th>Metric</th><th class="num" style="text-align:right">White</th><th class="num" style="text-align:right">Black</th></tr>`+
+    row('Accuracy (volatility-weighted)',s=>pct(s.acc))+
+    row('Accuracy (plain average)',s=>pct(s.plainAcc))+
+    row('Accuracy on decisive moves',s=>pct(s.decAcc))+
+    row('ACPL (avg centipawn loss)',s=>s.acpl!==null?s.acpl.toFixed(1):'–')+
+    row('Avg win% given away',s=>s.avgW!==null?s.avgW.toFixed(2)+' pts':'–')+
+    row('Engine top-1 move',s=>pct(s.top1))+
+    (engineLines>1? row('Engine top-'+engineLines+' move',s=>pct(s.top3)) : '')+
+    row('Plies counted / total',s=>s.counted+' / '+s.total)+
+    row('Worst moment',s=>s.worst? s.worst.san+' ('+s.worst.wpl.toFixed(1)+' win%)':'–');
+  const ob=$('openingBox');
+  if(opening){ ob.style.display='block'; ob.innerHTML=`<b>Opening:</b> ${opening.name}${opening.variation?' — '+opening.variation:''} <span class="muted">(matched against a built-in reference list, first ${bookPlies} half-moves treated as theory)</span>`; }
+  else ob.style.display='none';
+  renderCritical();
+}
+
+function renderCritical(){
+  const box=$('critBox'), list=$('critList'); list.innerHTML='';
+  const items=plies.filter(p=>p.label==='mistake'||p.label==='blunder'||p.label==='miss'||p.label==='missedMate'||p.label==='allowedMate');
+  if(!items.length){ box.style.display='none'; return; }
+  box.style.display='block';
+  items.forEach(p=>{
+    const L=LABELS[p.label];
+    const moveNo=Math.floor(p.i/2)+1, dots=p.i%2===0?'.':'...';
+    const row=document.createElement('div');
+    row.className='crit';
+    row.innerHTML=`<span class="${L.cls}">${moveNo}${dots} ${p.san} — ${L.label}${L.sym?' '+L.sym:''}</span>`+
+      `<br><span class="muted">${evalText(p.evalBefore)} → ${evalText(p.evalAfter)} · gave away ${p.wpl.toFixed(1)} win%`+
+      (p.pvAfter&&p.pvAfter.length? ' · '+p.pvAfter.slice(0,4).join(' '):'')+'</span>';
+    row.addEventListener('click',()=>{ curPly=p.i+1; refresh(); });
+    list.appendChild(row);
+  });
+}
+
+function renderSpec(){
+  $('specBox').style.display='block';
+  document.querySelectorAll('#specBox code[data-t]').forEach(el=>{
+    const v=TUNE[el.dataset.t];
+    el.textContent = (v===undefined)? '?' : String(v);
+  });
+  $('specSource').textContent = usingFallback
+    ? 'the built-in browser evaluator (Stockfish could not be started: '+engineErr+')'
+    : 'Stockfish 10.0.2 (UCI, client-side)';
+  $('specDepth').textContent = usingFallback
+    ? 'up to JS depth '+(FALLBACK_MAX_DEPTH||'–')+' per position, time-sliced'
+    : 'depth '+(depthUsed||'–')+' per position';
+  $('specMultipv').textContent = 'engine top '+engineLines+' lines used for the alternatives';
+}
+
+function renderDetail(){
+  const box=$('detailBox');
+  if(!plies.length||!evals.length){ box.style.display='none'; return; }
+  box.style.display='block';
+  const kv=$('dKv'), badges=$('dBadges');
+  kv.innerHTML=''; badges.innerHTML='';
+  const idx=curPly-1;
+  const e=evals[curPly];
+  if(idx<0){
+    $('dTitle').innerHTML='Starting position <span class="muted">· '+evalText(e)+' ('+e.wWhite.toFixed(1)+'%)</span>';
+    $('dPvBefore').innerHTML='<b>Engine best line</b> '+(e.pvSan.length?e.pvSan.join(' '):'—');
+    $('dPvAfter').innerHTML='';
+    return;
+  }
+  const p=plies[idx], L=LABELS[p.label];
+  const moveNo=Math.floor(p.i/2)+1, dots=p.i%2===0?'.':'...';
+  $('dTitle').innerHTML=`<span class="${L.cls}">${moveNo}${dots} ${p.san} — ${L.label}${L.sym?' '+L.sym:''}</span>`+
+    `<span class="muted">${p.side==='w'?'White':'Black'} to move · win% ${p.beforeWP.toFixed(1)} → ${p.afterWP.toFixed(1)}</span>`;
+  if(p.book) badges.innerHTML+='<span class="badge book">theory — not counted</span>';
+  if(p.forced) badges.innerHTML+='<span class="badge force">only move (engine alt. costs '+fmt(p.altWpl,1)+' win%)</span>';
+  if(p.unavoidable) badges.innerHTML+='<span class="badge force">unavoidable — position already lost</span>';
+  if(p.lowMat) badges.innerHTML+='<span class="badge lowm">precision endgame</span>';
+  if(p.over) badges.innerHTML+='<span class="badge lowm">position already finished</span>';
+  if(p.flags.missedMate) badges.innerHTML+='<span class="badge matef">had a forced mate in '+Math.abs(p.mateBefore)+'</span>';
+  if(p.flags.allowedMate) badges.innerHTML+='<span class="badge matef">allows a forced mate</span>';
+  if(p.flags.escapedMate) badges.innerHTML+='<span class="badge good2">escaped a forced mate</span>';
+  if(p.sac>=TUNE.brillSac) badges.innerHTML+='<span class="badge good2">sacrifice ('+p.sac+' cp)</span>';
+  if(p.sac<=-200) badges.innerHTML+='<span class="badge good2">wins material (+'+(-p.sac)+' cp)</span>';
+  if(p.timedOut) badges.innerHTML+='<span class="badge lowm">partial search</span>';
+  const rows=[
+    ['Your move', '<span class="hi">'+p.san+'</span>'+(p.mates?' <span class="tag-best">#</span>':'')],
+    ['Engine best', p.bestSan? p.bestSan+(p.playedIsTop1?' <span class="tag-best">= your move</span>':' <span class="muted">(loses '+fmt(p.wpl,1)+' win%)</span>') : '—'],
+    ['2nd engine line', p.altSan? p.altSan+' <span class="muted">(costs '+fmt(p.altWpl,1)+' win%)</span>' : '<span class="muted">not requested</span>'],
+    ['Engine eval before', evalText(p.evalBefore)+' <span class="muted">('+moverText(p.beforeMoverCp,p.mateBefore)+' for the mover)</span>'],
+    ['Engine eval after', evalText(p.evalAfter)+' <span class="muted">('+moverText(p.afterMoverCp,p.mateAfter)+' for the mover)</span>'],
+    ['Win% given away', p.wpl.toFixed(2)+' pts <span class="muted">('+p.beforeWP.toFixed(1)+'% → '+p.afterWP.toFixed(1)+'%)</span>'],
+    ['Centipawn loss', p.cpLoss+' cp'+(p.cpLoss>=TUNE.matePenalty?' <span class="muted">(mate line)</span>':'')],
+    ['Material swing', (p.sac>0?'−':p.sac<0?'+':'')+Math.abs(p.sac)+' cp'+(p.sac>0?' <span class="muted">(gave up)</span>':p.sac<0?' <span class="muted">(won)</span>':' <span class="muted">(even)</span>')],
+    ['Top-'+engineLines+' match', p.playedIsTop1? '<span class="tag-best">engine\'s #1 line</span>' : p.playedIsTop3? '<span class="tag-exc">inside engine top-'+engineLines+'</span>' : '<span class="muted">outside engine top-'+engineLines+'</span>'],
+    ['Move accuracy', p.count? p.acc.toFixed(1)+'% <span class="muted">(counted)</span>' : '<span class="muted">excluded from accuracy</span>'],
+    ['Source', p.source+' · depth '+p.depth]
+  ];
+  kv.innerHTML=rows.map(r=>'<dt>'+r[0]+'</dt><dd>'+r[1]+'</dd>').join('');
+  $('dPvBefore').innerHTML='<b>Engine best line</b> '+(p.pvBefore.length? p.pvBefore.join(' '):'—');
+  $('dPvAfter').innerHTML='<b>Your move, engine continues</b> '+(p.pvAfter.length? p.pvAfter.join(' '):'—');
+}
+
+function parsePGNHeaders(pgnText){
+  const headers={};
+  const re=/^\s*\[([^\s]+)\s+"((?:[^"\\]|\\.)*)"\s*\]\s*$/gm;
+  let m;
+  while((m=re.exec(pgnText))){
+    headers[m[1]]=m[2].replace(/\\(["\\])/g,'$1');
+  }
+  return headers;
+}
+
+function extractSAN(pgnText){
+  let body=pgnText
+    // Remove PGN tag-pair/header lines only. Headers are parsed separately.
+    .replace(/^\s*\[[^\]]*\]\s*$/gm,' ')
+    // Remove brace comments, including engine clock/eval annotations.
+    .replace(/\{[\s\S]*?\}/g,' ')
+    // Remove semicolon comments.
+    .replace(/;[^\n\r]*/g,' ')
+    // Remove NAGs.
+    .replace(/\$\d+/g,' ');
+  // Remove nested RAV/variation blocks. Repeat because PGNs can nest them.
+  let old;
+  do{ old=body; body=body.replace(/\([^()]*\)/g,' '); }while(body!==old);
+  // Move numbers, including forms such as 1... and 23....
+  body=body.replace(/(?:\d+\.{1,3})/g,' ');
+  // Game termination markers.
+  body=body.replace(/(?:1-0|0-1|1\/2-1\/2|\*)/g,' ');
+  return body.split(/\s+/).map(s=>s.trim()).filter(Boolean);
+}
+
+function cleanMoveToken(tok){
+  return tok
+    .replace(/[–—]/g,'-')
+    .replace(/^0-0-0$/i,'O-O-O')
+    .replace(/^0-0$/i,'O-O')
+    .replace(/[!?]+$/,'')
+    .trim();
+}
+
+function normalizeSANForCompare(s){
+  return cleanMoveToken(String(s||''))
+    .replace(/\s*e\.?p\.?$/i,'')
+    .replace(/[+#]+$/,'')
+    .replace(/^0-0-0$/i,'O-O-O')
+    .replace(/^0-0$/i,'O-O');
+}
+
+function legalMoveFromToken(game, token){
+  const wanted=normalizeSANForCompare(token);
+  const legal=game.moves({verbose:true});
+  const match=legal.find(m=>normalizeSANForCompare(m.san)===wanted);
+  if(match){
+    return game.move({from:match.from,to:match.to,promotion:match.promotion});
+  }
+  // Compatibility fallback for unusual SAN accepted by chess.js.
+  try{return game.move(token,{sloppy:true});}catch(e){return null;}
+}
+
+async function analyze(){
+  const pgn=$('pgnInput').value.trim();
+  const errBox=$('errBox'); errBox.style.display='none';
+  if(!pgn){ errBox.textContent='Paste a PGN first.'; errBox.style.display='block'; return; }
+  const depth=parseInt($('depthSel').value);
+
+  const headers=parsePGNHeaders(pgn);
+  const tokens=extractSAN(pgn);
+
+  // IMPORTANT: games with [SetUp "1"] + [FEN "..."] do NOT start from
+  // the normal chess starting position. The old version always did, which
+  // made perfectly legal moves appear illegal later in the PGN.
+  let startFen=null;
+  if(headers.SetUp==='1' && headers.FEN){
+    startFen=headers.FEN;
+  } else if(headers.FEN){
+    // Be tolerant of PGNs that include a FEN header without SetUp.
+    startFen=headers.FEN;
+  }
+
+  let replay;
+  try{
+    replay=startFen ? new Chess(startFen) : new Chess();
+  }catch(e){
+    errBox.textContent=`Invalid starting FEN in PGN: ${startFen||''}`;
+    errBox.style.display='block';
+    return;
+  }
+
+  fenList=[replay.fen()]; sanList=[]; moveMeta=[]; matesAt=[];
+  for(let ti=0;ti<tokens.length;ti++){
+    const raw=tokens[ti];
+    const tok=cleanMoveToken(raw);
+
+    // Standalone PGN result/annotation tokens are not chess moves.
+    if(!tok || /^(1-0|0-1|1\/2-1\/2|\\*)$/.test(tok) || /^e\\.?p\\.?$/i.test(tok)) continue;
+
+    const mv=legalMoveFromToken(replay,tok);
+
+    if(!mv){
+      const side=replay.turn()==='w'?'White':'Black';
+      const moveNo=Math.floor(sanList.length/2)+1;
+      const fen=replay.fen();
+      errBox.textContent=
+        `PGN stopped at move ${side} ${moveNo}: "${raw}". `+
+        `That token is not legal from the current position. `+
+        `If this is a game from a custom starting position, make sure the PGN contains a correct [FEN "..."] header.`;
+      errBox.style.display='block';
+      console.error('Invalid PGN token', {index:ti, raw, token:tok, fen});
+      return;
+    }
+
+    sanList.push(mv.san);
+    moveMeta.push(mv);
+    matesAt.push(replay.in_checkmate());
+    fenList.push(replay.fen());
+  }
+  if(sanList.length===0){ errBox.textContent='Could not find any legal moves in that PGN.'; errBox.style.display='block'; return; }
+  opening=startFen ? null : detectOpening(sanList);
+  const bookPref=$('bookSel').value;
+  bookPlies = bookPref==='auto' ? (opening?opening.moves.length:0) : parseInt(bookPref);
+
+  $('analyzeBtn').disabled=true;
+  $('engStatus').textContent='loading engine…';
+  ttTable.clear();
+  sfNoLines=0;
+  try{
+    await ensureEngine();
+    if(usingFallback) warnNoEngine();
+    engineLines=parseInt($('pvSel').value);
+    depthUsed=depth;
+    if(!usingFallback){
+      $('engStatus').textContent='analyzing with Stockfish…';
+      sendOption('MultiPV',engineLines);
+      sendOption('Hash',16);
+    }
+    $('progress').style.display='block';
+
+    evals=[];
+    for(let i=0;i<fenList.length;i++){
+      $('progLabel').textContent = `Analyzing position ${i+1}/${fenList.length}`;
+      $('progFill').style.width = ((i+1)/fenList.length*100)+'%';
+      const e=await evalPosition(fenList[i],depth);
+      evals.push(e);
+      curPly=i;
+      if(i%3===0 || i===fenList.length-1){
+        renderBoard(fenList[i]);
+        $('evalFill').style.height=e.wWhite+'%';
+        $('evalLabel').textContent=evalText(e)+'  ('+e.wWhite.toFixed(1)+'%)';
+      }
+      await new Promise(r=>setTimeout(r)); // yield to the browser so the tab stays responsive
+    }
+
+    plies=buildPlyRecords();
+    renderMoveList(); renderGraph(); renderSummary(); renderSpec();
+    curPly=fenList.length-1; refresh();
+    $('engStatus').textContent= usingFallback? 'done (built-in evaluator)' : 'done';
+    // If the engine quietly died mid-game the accuracy numbers below are not
+    // engine numbers, so say so instead of quietly mixing the two sources.
+    if(!usingFallback && sfNoLines>0){
+      const b=$('errBox');
+      b.textContent='Stockfish stopped returning lines: '+sfNoLines+' of '+fenList.length+
+        ' positions were scored by the weak built-in evaluator instead, so the accuracies and '+
+        'classifications are not comparable with the rest of the game. Reload the page and try again.';
+      b.style.display='block';
+    }
+  }catch(e){
+    errBox.textContent='Analysis stopped: '+e.message;
+    errBox.style.display='block';
+  }
+  $('progress').style.display='none';
+  $('analyzeBtn').disabled=false;
+}
+
+function splitPGNs(text){
+  return text.split(/\n\n(?=\[Event)/).map(s=>s.trim()).filter(Boolean);
+}
+function pgnHeader(pgn,key){
+  const m = pgn.match(new RegExp('\\['+key+' "([^"]*)"'));
+  return m ? m[1] : '?';
+}
+function pgnSortKey(pgn){
+  let d=pgnHeader(pgn,'UTCDate'); if(d==='?') d=pgnHeader(pgn,'Date');
+  let t=pgnHeader(pgn,'UTCTime'); if(t==='?') t='00:00:00';
+  return d.replace(/\./g,'-')+'T'+t;
+}
+function renderGameList(pgns){
+  pgns=[...pgns].sort((a,b)=>pgnSortKey(b).localeCompare(pgnSortKey(a)));
+  const box=$('gameList'); box.innerHTML='';
+  pgns.slice(0,15).forEach(pgn=>{
+    const w=pgnHeader(pgn,'White'), b=pgnHeader(pgn,'Black'), d=pgnHeader(pgn,'Date'), res=pgnHeader(pgn,'Result');
+    const row=document.createElement('div');
+    row.style.cssText='background:#141210;border-radius:6px;padding:6px 10px;cursor:pointer;font-size:.85rem;display:flex;justify-content:space-between';
+    row.innerHTML=`<span>${w} vs ${b}</span><span class="muted">${d} · ${res}</span>`;
+    row.addEventListener('click',()=>{ $('pgnInput').value=pgn; analyze(); window.scrollTo({top:0,behavior:'smooth'}); });
+    box.appendChild(row);
+  });
+  if(!pgns.length) box.innerHTML='<span class="muted">No games found.</span>';
+}
+
+async function fetchLichess(user){
+  const url=`https://lichess.org/api/games/user/${encodeURIComponent(user)}?max=15&sort=dateDesc&pgnInJson=false`;
+  const res=await fetch(url,{headers:{Accept:'application/x-chess-pgn'}});
+  if(!res.ok) throw new Error('Lichess request failed ('+res.status+')');
+  const text=await res.text();
+  return splitPGNs(text);
+}
+
+async function fetchChesscom(user){
+  const archRes=await fetch(`https://api.chess.com/pub/player/${encodeURIComponent(user)}/games/archives`);
+  if(!archRes.ok) throw new Error('Chess.com request failed ('+archRes.status+')');
+  const arch=await archRes.json();
+  if(!arch.archives || !arch.archives.length) return [];
+  const recent=arch.archives.slice(-2); // last two months, in case the newest month is thin
+  let pgns=[];
+  for(const url of recent){
+    const gRes=await fetch(url);
+    if(!gRes.ok) continue;
+    const gJson=await gRes.json();
+    pgns=pgns.concat((gJson.games||[]).map(g=>g.pgn));
+  }
+  return pgns;
+}
+
+$('fetchBtn').addEventListener('click',async()=>{
+  const user=$('userInput').value.trim();
+  const platform=$('platformSel').value;
+  if(!user){ $('linkStatus').textContent='enter a username'; return; }
+  $('linkStatus').textContent='fetching…'; $('fetchBtn').disabled=true;
+  try{
+    const pgns = platform==='lichess' ? await fetchLichess(user) : await fetchChesscom(user);
+    renderGameList(pgns);
+    $('linkStatus').textContent=pgns.length+' games found';
+  }catch(e){
+    $('linkStatus').textContent='Could not fetch — this only works when the file is opened locally, not in the claude.ai preview.';
+  }
+  $('fetchBtn').disabled=false;
+});
+
+document.querySelectorAll('.tabbtn').forEach(btn=>btn.addEventListener('click',()=>{
+  document.querySelectorAll('.tabbtn').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.tabpane').forEach(p=>p.classList.remove('active'));
+  btn.classList.add('active');
+  $('tab-'+btn.dataset.tab).classList.add('active');
+}));
+
+$('analyzeBtn').addEventListener('click',analyze);
+$('firstBtn').addEventListener('click',()=>{curPly=0;refresh();});
+$('prevBtn').addEventListener('click',()=>{curPly=Math.max(0,curPly-1);refresh();});
+$('nextBtn').addEventListener('click',()=>{curPly=Math.min(fenList.length-1,curPly+1);refresh();});
+$('lastBtn').addEventListener('click',()=>{curPly=fenList.length-1;refresh();});
+
+// Phones run the same wasm engine but several times slower than a desktop, and
+// a full game at depth 12 is already a multi-minute wait on a phone. Start
+// narrow screens on the fast setting; the dropdown is right there to raise it.
+if(window.matchMedia && window.matchMedia('(max-width:760px)').matches){
+  const ds=$('depthSel');
+  if(parseInt(ds.value,10)>10) ds.value='10';
+}
+
+try{renderBoard('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');}catch(e){console.error('Initial board render failed',e);}
+</script>
+</body>
+</html>
