@@ -12,13 +12,6 @@
 <meta property="og:description" content="Engine-verdict review of your chess games: per-move accuracy, mistake classification and critical moments. Runs entirely in your browser.">
 <meta name="twitter:card" content="summary">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%E2%99%9E%3C/text%3E%3C/svg%3E">
-<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
-<link rel="manifest" href="manifest.json">
-<link rel="apple-touch-icon" href="apple-touch-icon.png">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Chess Analyzer">
 <script src="https://cdn.jsdelivr.net/npm/chess.js@0.12.1/chess.js"></script>
 <style>
 :root{
@@ -50,7 +43,7 @@ button:disabled{opacity:.5;cursor:default}
 .sq svg{width:80%;height:80%;filter:drop-shadow(0 1.5px 1px rgba(0,0,0,.4))}
 .sq .wp{fill:#f7f7f2;stroke:#232323;stroke-width:1.4;stroke-linejoin:round}
 .sq .bp{fill:#2a2a2a;stroke:#000;stroke-width:1.4;stroke-linejoin:round}
-.navrow{display:flex;gap:8px;margin-top:10px;justify-content:center}
+.navrow{display:flex;gap:8px;margin-top:10px;justify-content:center;flex-wrap:wrap}
 .side{flex:1;min-width:320px;display:flex;flex-direction:column;gap:14px}
 .progress{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px;display:none}
 .bar{height:8px;background:#141210;border-radius:4px;overflow:hidden;margin-top:6px}
@@ -75,6 +68,8 @@ button:disabled{opacity:.5;cursor:default}
 .tabpane{display:none}
 .tabpane.active{display:block}
 .boardrow{display:flex;gap:10px}
+.playerlabel{font-size:.78rem;font-weight:600;color:var(--text);padding:2px 0;text-align:center}
+.playerlabel .you{color:var(--best);font-weight:400;font-size:.7rem;margin-left:6px}
 .evalbar{width:22px;height:340px;border:1px solid var(--line);border-radius:4px;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end;background:#1c1a17}
 .evalbar .whitefill{background:#eee7da;width:100%;height:50%;transition:height .3s}
 .evallabel{text-align:center;font-size:.7rem;color:var(--muted);margin-top:4px}
@@ -140,10 +135,13 @@ button:disabled{opacity:.5;cursor:default}
     /* Fluid square board. aspect-ratio keeps the 8x8 grid rows square
        without the fixed 340px height that used to squash them. */
     .board{width:100%;max-width:340px;height:auto;aspect-ratio:1/1}
-    /* The vertical eval bar is fixed at 340px tall and its fill is driven by
-       `style.height` from analyze(), so it cannot follow a fluid board.
-       Hidden on phones; the numeric eval label under it is kept. */
-    .evalbar{display:none}
+    /* The vertical eval bar used to be fixed at 340px tall while the board
+       above it goes fluid, so on any screen under 760px it could no longer
+       match the board's height and was just hidden outright. Instead: drop
+       the fixed height and let flexbox stretch it to match whatever height
+       the board actually renders at (boardrow is a plain flex row, so a
+       height:auto child stretches to the row's cross-axis size by default). */
+    .evalbar{height:auto;align-self:stretch}
     .evallabel{font-size:.78rem;font-weight:600}
     .navrow{gap:6px}
     .navrow button{flex:1 1 22%;padding:12px 4px;font-size:.8rem}
@@ -239,17 +237,22 @@ button:disabled{opacity:.5;cursor:default}
   <div class="tabpane active" id="tab-analysis">
     <div class="main">
       <div class="boardcol">
+        <div class="playerlabel" id="topPlayer">Black</div>
         <div class="boardrow">
           <div class="evalbar"><div class="whitefill" id="evalFill"></div></div>
           <div class="board" id="board"></div>
         </div>
+        <div class="playerlabel" id="bottomPlayer">White</div>
         <div class="evallabel" id="evalLabel">–</div>
         <div class="navrow">
           <button id="firstBtn">⏮</button>
           <button id="prevBtn">◀</button>
+          <button id="playBtn" title="Auto-play through the moves">▶ Play</button>
           <button id="nextBtn">▶</button>
           <button id="lastBtn">⏭</button>
+          <button id="flipBtn" title="Flip board">⇅ Flip</button>
         </div>
+        <div class="muted" id="meNote" style="font-size:.72rem;margin-top:4px;display:none"></div>
         <div class="progress" id="progress">
           <span class="muted" id="progLabel">Analyzing…</span>
           <div class="bar"><div id="progFill"></div></div>
@@ -265,8 +268,8 @@ button:disabled{opacity:.5;cursor:default}
     <div class="opening" id="openingBox"></div>
     <div class="summary" id="summary">
       <div class="acccircle">
-        <div class="cell">White accuracy<br><b id="wAcc">–</b></div>
-        <div class="cell">Black accuracy<br><b id="bAcc">–</b></div>
+        <div class="cell"><span id="wAccLbl">White</span> accuracy<br><b id="wAcc">–</b></div>
+        <div class="cell"><span id="bAccLbl">Black</span> accuracy<br><b id="bAcc">–</b></div>
       </div>
       <div class="accnote muted" id="accNote">–</div>
       <div class="stats" id="statsGrid"></div>
@@ -304,13 +307,11 @@ button:disabled{opacity:.5;cursor:default}
       <div class="note">
         <b>Accuracy score.</b> Each counted move gets a per-move accuracy
         <code>103.1668·e^(−0.04354·winLoss) − 3.1669</code> from its own win% loss. The headline
-        game accuracy is not a plain average of those numbers: each move is weighted by the local
-        standard deviation of win% in a small window around it (window size <code>clamp(plies/10, 2, 8)</code>,
-        weight itself clamped to <code>0.5–12</code>), so a slip deep in an already-decided position counts
-        for less than one in a sharp, contested position. The final percentage is the average of the
-        weighted mean and the weighted harmonic mean of those per-move accuracies — the harmonic half
-        means one real blunder pulls an otherwise clean game's score down more than a plain average would.
-        The old plain average is still shown in the Engine metrics table for comparison.
+        game accuracy is a weighted average of those numbers, not a plain one: each move is weighted
+        by the local standard deviation of win% in a small window around it (window size
+        <code>clamp(plies/10, 2, 8)</code>, weight itself clamped to <code>0.5–12</code>), so a slip deep
+        in an already-decided position counts for less than one in a sharp, contested position. The
+        plain (unweighted) average is still shown in the Engine metrics table for comparison.
       </div>
       <table class="rules">
         <thead><tr><th>Label</th><th>Engine rule (mover's point of view)</th><th>In accuracy</th></tr></thead>
@@ -931,6 +932,17 @@ function packFallback(fen,r,note,timedOut){
                   null,!!timedOut,'built-in evaluator, JS depth '+(r.depth||FALLBACK_MAX_DEPTH)+(note?' ('+note+')':''));
 }
 async function evalPosition(fen,depth){
+  // A checkmated position has no legal moves, so neither Stockfish nor the JS
+  // fallback can search it — both used to silently fall through to a flat
+  // "cp: 0" (dead equal), which looks exactly like a draw and, worse, fed a
+  // wrong ~50% "after" win% into the mating move itself, corrupting its
+  // accuracy and sometimes even labelling the winning move "Missed mate".
+  // Handled directly instead, as "mate 0" (the side to move has already lost),
+  // which mateWinPct already turns into a near-0% win chance for them.
+  if(new Chess(fen).in_checkmate()){
+    return packEval(fen,[{type:'mate',value:0,multipv:1,depth:depth||0,pv:[]}],
+                    null,false,'checkmate — no search needed');
+  }
   if(usingFallback || !sf) return packFallback(fen, await localSearch(fen,depth), '', false);
   const budget=1500+depth*250;
   const res=await sfSearch(fen,depth,budget);
@@ -991,8 +1003,14 @@ const TIERS=['brill','great','best','exc','good','inacc','miss','mistake','blund
 
 function winPct(cp){ return 50+50*(2/(1+Math.exp(-0.00368208*Math.max(-3000,Math.min(3000,cp))))-1); }
 function mateWinPct(mateMoves){
+  // BUG FIX: this used to run Math.abs(mateMoves) and always return a HIGH
+  // win% (50-98), so a negative mate score — the side to move getting mated,
+  // not delivering one — was shown as if they were winning. That flipped the
+  // eval bar (and every win%/accuracy figure) every time the engine saw a
+  // forced mate coming, which is exactly around the end of a decisive game.
   const d=Math.max(1,Math.abs(mateMoves));
-  return Math.max(50,Math.min(98,100-2*(d-1)));   // mate in 1 = 98%, decaying 2% per move
+  const w=Math.max(50,Math.min(98,100-2*(d-1)));  // confidence from mate distance, 50-98
+  return mateMoves>0 ? w : 100-w;                 // >0: mover delivers mate. <0: mover gets mated.
 }
 function moveAcc(wpl){ const a=103.1668*Math.exp(-0.04354*Math.max(0,wpl))-3.1669; return Math.min(100,Math.max(0,a)); }
 function normSan(s){ return normalizeSANForCompare(s); }
@@ -1004,10 +1022,15 @@ function normSan(s){ return normalizeSANForCompare(s); }
 // is weighted by how much the win% was swinging locally (its standard
 // deviation over a small window around that move): calm, already-decided
 // stretches count for less, and tense, high-stakes stretches count for more.
-// The final figure blends a weighted mean with a weighted harmonic mean —
-// the harmonic side punishes a single bad move in an otherwise steady game
-// more than a plain weighted mean would, matching how a human reviewer would
-// judge "one blunder ruined an otherwise accurate game".
+//
+// An earlier version of this blended in a weighted *harmonic* mean on top,
+// meant to punish a single bad move in an otherwise clean game. In practice
+// that made the score wildly unstable: a harmonic mean is dominated by its
+// smallest input, so even one or two ordinary blunders (never mind a scoring
+// bug elsewhere feeding it near-zero values) could crash the whole figure
+// into the 30s regardless of how the rest of the game was played. A weighted
+// arithmetic mean can't do that — it stays bounded between the best and worst
+// per-move accuracy in the game — so that's all this computes now.
 // ---------------------------------------------------------------------------
 function stdev(arr){
   const n=arr.length; if(!n) return 0;
@@ -1029,17 +1052,17 @@ function volatilityWeights(mine){
 function weightedAccuracy(mine){
   if(!mine.length) return null;
   const weights = volatilityWeights(mine);
-  let wsum=0, wmean=0, hsum=0, hmean=0, any=false;
+  let wsum=0, wmean=0, any=false;
   mine.forEach((p,j)=>{
     if(!p.count) return;
     any=true;
-    const w=weights[j], a=Math.max(0.1,p.acc);
-    wsum+=w; wmean+=w*a;
-    hsum+=w; hmean+=w/a;
+    const w=weights[j];
+    wsum+=w; wmean+=w*p.acc;
   });
   if(!any || !wsum) return null;
-  return (wmean/wsum + hsum/hmean)/2;
+  return wmean/wsum;
 }
+
 
 function isDeadPosition(fen){
   const g=new Chess(fen);
@@ -1093,9 +1116,16 @@ function buildPlyRecords(){
     const beforeWP=b.wMover;                  // win% of the player about to move
     const afterWP=100-a.wMover;               // ... after the move (it is the opponent's turn)
     const wpl=Math.max(0,Math.min(100,beforeWP-afterWP));
+    const deliversMate=!!matesAt[i];          // ground truth from chess.js: this move IS checkmate
     const flags={};
     let cpLoss=0;
-    if(b.mate!==null && b.mate>0){
+    if(deliversMate){
+      // Checkmate is delivered right now, not merely kept alive for later —
+      // a.mate reads back as 0 ("already lost"), not a negative distance, so
+      // without this branch the winning move here would fall through to the
+      // a.mate<0 check below, fail it, and get mislabelled "Missed mate".
+      flags.keepsMate=true;
+    }else if(b.mate!==null && b.mate>0){
       if(a.mate!==null && a.mate<0) flags.keepsMate=true; else flags.missedMate=true;
     }else if(b.mate!==null && b.mate<0){
       if(a.mate===null) flags.escapedMate=true;
@@ -1170,20 +1200,52 @@ function sideStats(side){
   };
 }
 
-function renderBoard(fen){
-  const rows=fen.split(' ')[0].split('/');
-  const b=$('board'); b.innerHTML='';
-  for(let r=0;r<8;r++){
-    let c=0;
-    for(const ch of rows[r]){
-      if(/\d/.test(ch)){ for(let i=0;i<+ch;i++){ addSq(r,c,'',false); c++; } }
-      else { addSq(r,c,PIECES[ch]||'', ch===ch.toUpperCase()); c++; }
-    }
+// ---------------------------------------------------------------------------
+// Board orientation. boardFlipped=true means Black's home rank is drawn at
+// the bottom (i.e. the board is shown from Black's side of the table).
+// whiteName/blackName come from the PGN's [White]/[Black] tags; meSide is set
+// automatically when the "username" field (used for the Lichess/Chess.com
+// import) matches one of those two names, so the board defaults to sitting on
+// whichever side that account actually played. The Flip button always lets
+// the person override this by hand.
+// ---------------------------------------------------------------------------
+let boardFlipped=false, meSide=null, whiteName='White', blackName='Black';
+function updatePlayerLabels(){
+  const top=$('topPlayer'), bot=$('bottomPlayer'), note=$('meNote');
+  const whiteLbl=whiteName+(meSide==='w'?' <span class="you">(you)</span>':'');
+  const blackLbl=blackName+(meSide==='b'?' <span class="you">(you)</span>':'');
+  top.innerHTML = boardFlipped? whiteLbl : blackLbl;
+  bot.innerHTML = boardFlipped? blackLbl : whiteLbl;
+  if(meSide){
+    note.style.display='block';
+    note.textContent = 'Board oriented for '+(meSide==='w'?whiteName:blackName)+' (playing '+(meSide==='w'?'White':'Black')+').';
+  } else {
+    note.style.display='none';
   }
-  function addSq(r,c,pid,isWhite){
+}
+function renderBoard(fen){
+  const rows=fen.split(' ')[0].split('/'); // rows[0]=rank8 ... rows[7]=rank1
+  // Parse into an 8x8 grid first (r=0 is rank8, c=0 is file a, matching FEN
+  // order) so the two orientations can just choose a different walk order
+  // over the same data, instead of duplicating the parsing.
+  const grid=[];
+  for(let r=0;r<8;r++){
+    const row=[]; let c=0;
+    for(const ch of rows[r]){
+      if(/\d/.test(ch)){ for(let i=0;i<+ch;i++){ row[c]=null; c++; } }
+      else { row[c]={pid:PIECES[ch]||'', isWhite: ch===ch.toUpperCase()}; c++; }
+    }
+    grid.push(row);
+  }
+  const b=$('board'); b.innerHTML='';
+  const order=[0,1,2,3,4,5,6,7];
+  const rOrder = boardFlipped? order.slice().reverse() : order;
+  const cOrder = boardFlipped? order.slice().reverse() : order;
+  for(const r of rOrder) for(const c of cOrder) addSq(r,c,grid[r][c]);
+  function addSq(r,c,cell){
     const d=document.createElement('div');
     d.className='sq '+(((r+c)%2===0)?'l':'d');
-    if(pid) d.innerHTML=`<svg class="${isWhite?'wp':'bp'}" viewBox="0 0 45 45"><use href="#${pid}"/></svg>`;
+    if(cell && cell.pid) d.innerHTML=`<svg class="${cell.isWhite?'wp':'bp'}" viewBox="0 0 45 45"><use href="#${cell.pid}"/></svg>`;
     b.appendChild(d);
   }
 }
@@ -1200,11 +1262,12 @@ function renderMoveList(){
     html += `<span class="mv ${L?L.cls:''}" data-ply="${i+1}" title="${L?L.label:''}${p&&p.count?'':' (not counted in accuracy)'}">${prefix}${sanList[i]}${sym}</span> `;
   }
   ml.innerHTML=html;
-  ml.querySelectorAll('.mv').forEach(el=>el.addEventListener('click',()=>{curPly=+el.dataset.ply; refresh();}));
+  ml.querySelectorAll('.mv').forEach(el=>el.addEventListener('click',()=>{stopPlay(); curPly=+el.dataset.ply; refresh();}));
 }
 
 function evalText(e){
   if(!e) return '–';
+  if(e.wMate===0) return 'Checkmate';
   if(e.wMate!==null && e.wMate!==undefined) return (e.wMate>0?'M':'−M')+Math.abs(e.wMate);
   if(e.wCp===null||e.wCp===undefined) return '–';
   return (e.wCp>=0?'+':'')+(e.wCp/100).toFixed(2);
@@ -1246,11 +1309,13 @@ function pct(v){ return (v===null||v===undefined)? '–' : v.toFixed(1)+'%'; }
 function renderSummary(){
   $('summary').style.display='block';
   const W=sideStats('w'), B=sideStats('b');
+  $('wAccLbl').textContent=whiteName;
+  $('bAccLbl').textContent=blackName;
   $('wAcc').textContent = W.acc!==null? W.acc.toFixed(1)+'%' : '–';
   $('bAcc').textContent = B.acc!==null? B.acc.toFixed(1)+'%' : '–';
   const ex=W.excluded, exB=B.excluded;
   $('accNote').innerHTML =
-    `Volatility-weighted accuracy over <b>${W.counted}</b> White and <b>${B.counted}</b> Black counted plies `+
+    `Volatility-weighted accuracy over <b>${W.counted}</b> ${whiteName} (White) and <b>${B.counted}</b> ${blackName} (Black) counted plies `+
     `(plain average: ${pct(W.plainAcc)} / ${pct(B.plainAcc)} — see Engine metrics below). `+
     `Excluded from the average: theory (${ex.book}/${exB.book}), only-move (${ex.forced}/${exB.forced}), `+
     `unavoidable (${ex.unavoidable}/${exB.unavoidable}), precision endgames (${ex.endgame}/${exB.endgame}), `+
@@ -1260,7 +1325,7 @@ function renderSummary(){
   // nothing (Great, Brilliant, Miss, Mistake, Blunder, Book, ...) is left out.
   const grid=$('statsGrid');
   const totW=W.total||1, totB=B.total||1;
-  let rows='<tr><th>Move type</th><th class="num">White</th><th class="num">Black</th></tr>';
+  let rows=`<tr><th>Move type</th><th class="num">${whiteName}</th><th class="num">${blackName}</th></tr>`;
   TIERS.forEach(k=>{
     const L=LABELS[k], wc=W.counts[k]||0, bc=B.counts[k]||0;
     if(!wc && !bc) return; // skip a tier neither side ever received
@@ -1273,7 +1338,7 @@ function renderSummary(){
   $('metricBox').style.display='block';
   const row=(name,fn)=>`<tr><td>${name}</td><td class="num">${fn(W)}</td><td class="num">${fn(B)}</td></tr>`;
   $('metricTable').innerHTML =
-    `<tr><th>Metric</th><th class="num" style="text-align:right">White</th><th class="num" style="text-align:right">Black</th></tr>`+
+    `<tr><th>Metric</th><th class="num" style="text-align:right">${whiteName}</th><th class="num" style="text-align:right">${blackName}</th></tr>`+
     row('Accuracy (volatility-weighted)',s=>pct(s.acc))+
     row('Accuracy (plain average)',s=>pct(s.plainAcc))+
     row('Accuracy on decisive moves',s=>pct(s.decAcc))+
@@ -1339,7 +1404,7 @@ function renderDetail(){
   const p=plies[idx], L=LABELS[p.label];
   const moveNo=Math.floor(p.i/2)+1, dots=p.i%2===0?'.':'...';
   $('dTitle').innerHTML=`<span class="${L.cls}">${moveNo}${dots} ${p.san} — ${L.label}${L.sym?' '+L.sym:''}</span>`+
-    `<span class="muted">${p.side==='w'?'White':'Black'} to move · win% ${p.beforeWP.toFixed(1)} → ${p.afterWP.toFixed(1)}</span>`;
+    `<span class="muted">${p.side==='w'?whiteName:blackName} to move · win% ${p.beforeWP.toFixed(1)} → ${p.afterWP.toFixed(1)}</span>`;
   if(p.book) badges.innerHTML+='<span class="badge book">theory — not counted</span>';
   if(p.forced) badges.innerHTML+='<span class="badge force">only move (engine alt. costs '+fmt(p.altWpl,1)+' win%)</span>';
   if(p.unavoidable) badges.innerHTML+='<span class="badge force">unavoidable — position already lost</span>';
@@ -1428,6 +1493,7 @@ function legalMoveFromToken(game, token){
 }
 
 async function analyze(){
+  stopPlay();
   const pgn=$('pgnInput').value.trim();
   const errBox=$('errBox'); errBox.style.display='none';
   if(!pgn){ errBox.textContent='Paste a PGN first.'; errBox.style.display='block'; return; }
@@ -1435,6 +1501,19 @@ async function analyze(){
 
   const headers=parsePGNHeaders(pgn);
   const tokens=extractSAN(pgn);
+
+  // Player names + board orientation: [White]/[Black] PGN tags decide the
+  // names shown, and if the "username" field (shared with the Lichess/
+  // Chess.com import above) matches either one, the board is oriented so
+  // that player's own pieces sit at the bottom, as if they were sitting at
+  // that side of the table.
+  whiteName = headers.White && headers.White!=='?' ? headers.White : 'White';
+  blackName = headers.Black && headers.Black!=='?' ? headers.Black : 'Black';
+  const me=($('userInput').value||'').trim().toLowerCase();
+  if(me && me===whiteName.toLowerCase()){ meSide='w'; boardFlipped=false; }
+  else if(me && me===blackName.toLowerCase()){ meSide='b'; boardFlipped=true; }
+  else { meSide=null; boardFlipped=false; }
+  updatePlayerLabels();
 
   // IMPORTANT: games with [SetUp "1"] + [FEN "..."] do NOT start from
   // the normal chess starting position. The old version always did, which
@@ -1614,10 +1693,42 @@ document.querySelectorAll('.tabbtn').forEach(btn=>btn.addEventListener('click',(
 }));
 
 $('analyzeBtn').addEventListener('click',analyze);
-$('firstBtn').addEventListener('click',()=>{curPly=0;refresh();});
-$('prevBtn').addEventListener('click',()=>{curPly=Math.max(0,curPly-1);refresh();});
-$('nextBtn').addEventListener('click',()=>{curPly=Math.min(fenList.length-1,curPly+1);refresh();});
-$('lastBtn').addEventListener('click',()=>{curPly=fenList.length-1;refresh();});
+$('firstBtn').addEventListener('click',()=>{stopPlay(); curPly=0;refresh();});
+$('prevBtn').addEventListener('click',()=>{stopPlay(); curPly=Math.max(0,curPly-1);refresh();});
+$('nextBtn').addEventListener('click',()=>{stopPlay(); curPly=Math.min(fenList.length-1,curPly+1);refresh();});
+$('lastBtn').addEventListener('click',()=>{stopPlay(); curPly=fenList.length-1;refresh();});
+$('flipBtn').addEventListener('click',()=>{
+  boardFlipped=!boardFlipped;
+  // A manual flip is a deliberate override, so it no longer claims to be
+  // auto-detected from the username — the (you) tag would otherwise end up
+  // labelling the wrong side.
+  meSide=null;
+  updatePlayerLabels();
+  if(fenList.length) renderBoard(fenList[curPly]);
+});
+
+// Auto-play: steps one ply at a time on a fixed interval and re-uses the same
+// refresh() the manual nav buttons use, so the board, eval bar, move list
+// highlight and detail panel all stay in sync. Any manual navigation stops it,
+// so it never fights with the person clicking around.
+let playTimer=null;
+const PLAY_INTERVAL_MS=800;
+function stopPlay(){
+  if(playTimer){ clearInterval(playTimer); playTimer=null; }
+  $('playBtn').textContent='▶ Play';
+  $('playBtn').title='Auto-play through the moves';
+}
+function startPlay(){
+  if(!fenList.length) return;
+  if(curPly>=fenList.length-1) curPly=0; // restart from the beginning if already at the end
+  $('playBtn').textContent='⏸ Pause';
+  $('playBtn').title='Pause auto-play';
+  playTimer=setInterval(()=>{
+    if(curPly>=fenList.length-1){ stopPlay(); return; }
+    curPly++; refresh();
+  }, PLAY_INTERVAL_MS);
+}
+$('playBtn').addEventListener('click',()=>{ playTimer? stopPlay() : startPlay(); });
 
 // Phones run the same wasm engine but several times slower than a desktop, and
 // a full game at depth 12 is already a multi-minute wait on a phone. Start
@@ -1627,15 +1738,7 @@ if(window.matchMedia && window.matchMedia('(max-width:760px)').matches){
   if(parseInt(ds.value,10)>10) ds.value='10';
 }
 
-try{renderBoard('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');}catch(e){console.error('Initial board render failed',e);}
-
-// Registering this is what lets a browser offer "install"/"add to home
-// screen" and lets the page shell open even with no connection.
-if('serviceWorker' in navigator){
-  window.addEventListener('load',()=>{
-    navigator.serviceWorker.register('sw.js').catch(()=>{});
-  });
-}
+try{updatePlayerLabels(); renderBoard('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');}catch(e){console.error('Initial board render failed',e);}
 </script>
 </body>
 </html>
