@@ -1035,7 +1035,7 @@ const TUNE={
   onlyMoveGap:8,
   wonAt:60,
   greatWpl:5, greatSavedAt:45,
-  brillSac:200, brillWpl:3, brillCp:30, brillFloor:20,
+  brillSac:200, brillWpl:3, brillCp:30, brillFloor:20, brillMaxBefore:92,
   missWpl:10,
   sacBlunder:300,
   matePenalty:800,
@@ -1134,6 +1134,24 @@ function isLowMaterial(fen){
   }));
   return pawns===0 && other<=TUNE.lowMaterialCp;
 }
+// A sacrifice is material the mover is still down once the engine's line has
+// settled (next move not a capture). Comparing material before/after the played
+// move alone can never show one -- the mover's own move never lowers their count.
+function sacrificeAlongPv(fenBefore,playedSan,pvSan,side){
+  try{
+    const g=new Chess(fenBefore), opp=side==='w'?'b':'w';
+    const bal=()=>{ let a=0,b=0; g.board().forEach(r=>r.forEach(q=>{ if(!q) return; if(q.color===side) a+=PVALS[q.type]; else if(q.color===opp) b+=PVALS[q.type]; })); return a-b; };
+    const b0=bal(), seq=[playedSan].concat((pvSan||[]).slice(0,5)), bals=[], caps=[];
+    for(const san of seq){ const m=g.move(san); if(!m) break; caps.push(!!m.captured); bals.push(bal()); }
+    let low=b0;
+    for(let k=0;k<bals.length;k++){
+      const last=(k===bals.length-1);
+      const settled = last ? !caps[k] : !caps[k+1];
+      if(settled && bals[k]<low) low=bals[k];
+    }
+    return Math.max(0,b0-low);
+  }catch(e){ return 0; }
+}
 function materialSwing(fenA,fenB,side){
   return materialCount(fenA,side)-materialCount(fenB,side); // >0 = mover gave up material
 }
@@ -1145,11 +1163,11 @@ function classifyPly(p){
   if(p.mates){
     // The engine finds every mate in one, so a delivered mate is only Brilliant
     // when it cost material to get there.
-    if(p.sac>=T.brillSac && p.wpl<=T.brillWpl) return 'brill';
+    if(p.sacPv>=T.brillSac && p.wpl<=T.brillWpl) return 'brill';
     return 'best';
   }
   if(p.flags.escapedMate && p.wpl<=T.greatWpl) return 'great';
-  if(p.sac>=T.brillSac && p.wpl<=T.brillWpl && p.cpLoss<=T.brillCp && p.afterMoverCp>=T.brillFloor) return 'brill';
+  if(p.sacPv>=T.brillSac && p.wpl<=T.brillWpl && p.cpLoss<=T.brillCp && p.afterMoverCp>=T.brillFloor && p.beforeWP<=T.brillMaxBefore) return 'brill';
   const rescued = p.wpl<=T.greatWpl && p.beforeWP<=T.greatSavedAt && p.afterWP>=20 && p.afterWP>=p.beforeWP-1;
   const held    = p.wpl<=T.greatWpl && p.beforeWP>=T.wonAt && p.altWpl!==null && p.altWpl>=T.missWpl;
   if(rescued||held) return 'great';
@@ -1216,6 +1234,7 @@ function buildPlyRecords(){
       i, side, san:sanList[i],
       beforeWP, afterWP, wpl, cpLoss,
       sac: materialSwing(fenList[i],fenList[i+1],side),
+      sacPv: sacrificeAlongPv(fenList[i],sanList[i],a.pvSan,side),
       beforeMoverCp: b.cp, afterMoverCp: a.cp!==null? -a.cp : null,
       mateBefore: b.mate, mateAfter: a.mate, flags,
       altWpl, gap, forced, unavoidable,
@@ -1477,7 +1496,7 @@ function renderDetail(){
   if(p.flags.missedMate) badges.innerHTML+='<span class="badge matef">had a forced mate in '+Math.abs(p.mateBefore)+'</span>';
   if(p.flags.allowedMate) badges.innerHTML+='<span class="badge matef">allows a forced mate</span>';
   if(p.flags.escapedMate) badges.innerHTML+='<span class="badge good2">escaped a forced mate</span>';
-  if(p.sac>=TUNE.brillSac) badges.innerHTML+='<span class="badge good2">sacrifice ('+p.sac+' cp)</span>';
+  if(p.sacPv>=TUNE.brillSac) badges.innerHTML+='<span class="badge good2">sacrifice ('+p.sacPv+' cp)</span>';
   if(p.sac<=-200) badges.innerHTML+='<span class="badge good2">wins material (+'+(-p.sac)+' cp)</span>';
   if(p.timedOut) badges.innerHTML+='<span class="badge lowm">partial search</span>';
   const rows=[
