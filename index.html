@@ -6,6 +6,13 @@
 <title>Chess-Analyzer</title>
 <meta name="description" content="Paste a PGN and get an engine-verdict review of your chess game: per-move accuracy, mistake classification, critical moments and opening detection. Runs entirely in your browser.">
 <meta name="theme-color" content="#171512">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Chess-Analyzer">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Chess-Analyzer">
 <meta property="og:title" content="Chess-Analyzer">
@@ -169,6 +176,7 @@ button:disabled{opacity:.5;cursor:default}
 .page{display:none}.page.active{display:block}
 body.on-home>.wrap>.err{margin-top:0}
 body.on-home header{display:none}
+.wrap>#settingsBox,body.on-home #settingsBox{display:none}
 body{transition:background .25s}
 body.on-home{background:radial-gradient(ellipse at 50% 38%,#14120f 0%,#0b0b0c 62%,#08080a 100%) fixed}
 header .hicon{width:30px;height:30px;border-radius:0}
@@ -208,6 +216,8 @@ header .hicon{width:30px;height:30px;border-radius:0}
         <button class="primary" data-go="pgn">Paste PGN<small>Analyze a game from PGN text</small></button>
         <button data-go="import">Import games<small>Lichess or Chess.com username</small></button>
       </div>
+      <button id="installBtn" class="primary" style="display:none;margin-top:6px">⬇ Install app</button>
+      <p id="installHint" style="display:none;font-size:.8rem"></p>
     </div>
   </section>
 
@@ -1810,6 +1820,25 @@ document.querySelectorAll('[data-go]').forEach(b=>b.addEventListener('click',()=
   showPage(b.dataset.go==='back'? lastSource : b.dataset.go);
 }));
 showPage('home');
+
+// ---- Install as an app (PWA)
+let deferredInstall=null;
+const isStandalone=matchMedia('(display-mode: standalone)').matches||navigator.standalone;
+if('serviceWorker' in navigator && location.protocol.startsWith('http')){
+  navigator.serviceWorker.register('sw.js').catch(e=>console.warn('SW failed',e));
+}
+window.addEventListener('beforeinstallprompt',e=>{ e.preventDefault(); deferredInstall=e; $('installBtn').style.display=''; $('installHint').style.display='none'; });
+$('installBtn').addEventListener('click',async()=>{
+  if(!deferredInstall) return;
+  deferredInstall.prompt(); await deferredInstall.userChoice; deferredInstall=null; $('installBtn').style.display='none';
+});
+window.addEventListener('appinstalled',()=>{ $('installBtn').style.display='none'; $('installHint').style.display='none'; });
+if(!isStandalone){
+  const h=$('installHint'), ua=navigator.userAgent;
+  if(location.protocol==='file:'){ h.textContent='To install: host this folder on HTTPS (Netlify, GitHub Pages, Vercel) — apps cannot be installed from a local file.'; h.style.display=''; }
+  else if(/iPhone|iPad|iPod/.test(ua)){ h.textContent='To install on iPhone/iPad: tap Share, then “Add to Home Screen”.'; h.style.display=''; }
+  else setTimeout(()=>{ if(!deferredInstall && !isStandalone){ h.textContent='To install: open your browser menu and choose “Install app” / “Add to Home screen”.'; h.style.display=''; } },2500);
+}
 </script>
 </body>
 </html>
