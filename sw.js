@@ -1,44 +1,37 @@
-// Minimal service worker: caches the app shell so it opens offline once
-// installed, and satisfies the "registered service worker with a fetch
-// handler" requirement browsers check before offering to install a PWA.
-// It does not try to cache the Stockfish/chess.js CDN files or the
-// Lichess/Chess.com API calls — those still need a live connection.
-const CACHE = 'chess-analyzer-shell-v1';
-const SHELL = ['./', './index.html', './manifest.json'];
+const CACHE = 'chess-analyzer-v6';
+const SHELL = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 
-self.addEventListener('install', (e) => {
-  e.waitUntil(
-    caches.open(CACHE).then((c) => c.addAll(SHELL)).catch(() => {})
-  );
-  self.skipWaiting();
+self.addEventListener('install', e => {
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
 });
 
-self.addEventListener('activate', (e) => {
+self.addEventListener('activate', e => {
   e.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
-    )
+    caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
+      .then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
 
-self.addEventListener('fetch', (e) => {
-  if (e.request.method !== 'GET') return;
-  // Only manage same-origin requests; let cross-origin (CDN/API) calls pass straight through.
-  if (new URL(e.request.url).origin !== self.location.origin) return;
+self.addEventListener('fetch', e => {
+  const req = e.request;
+  if (req.method !== 'GET') return;
+  const url = new URL(req.url);
+  // Never cache live game-import APIs
+  if (url.hostname.endsWith('lichess.org') || url.hostname.endsWith('chess.com')) return;
 
+  // Pages: network first, fall back to cache (so updates arrive, offline still works)
+  if (req.mode === 'navigate') {
+    e.respondWith(
+      fetch(req).then(r => { const copy = r.clone(); caches.open(CACHE).then(c => c.put('./index.html', copy)); return r; })
+        .catch(() => caches.match('./index.html'))
+    );
+    return;
+  }
+  // Everything else (chess.js, Stockfish wasm from CDN, icons): cache first, then network + store
   e.respondWith(
-    caches.match(e.request).then((cached) => {
-      const network = fetch(e.request)
-        .then((res) => {
-          if (res && res.status === 200) {
-            const copy = res.clone();
-            caches.open(CACHE).then((c) => c.put(e.request, copy));
-          }
-          return res;
-        })
-        .catch(() => cached);
-      return cached || network;
-    })
+    caches.match(req).then(hit => hit || fetch(req).then(r => {
+      if (r && (r.ok || r.type === 'opaque')) { const copy = r.clone(); caches.open(CACHE).then(c => c.put(req, copy)); }
+      return r;
+    }))
   );
 });
